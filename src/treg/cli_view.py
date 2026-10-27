@@ -17,14 +17,29 @@ def table(rows: list[dict[str, Any]], fields: tuple[str, ...]) -> list[dict[str,
 
 
 def render(view: dict[str, Any], help_lines: list[str] | None = None) -> str:
+    """Consecutive one-line fields form one paragraph; each table or nested block is its own,
+    with a blank line between paragraphs (valid TOON: a decoder skips them)."""
     from toon_format import encode
 
-    body = encode({k: v for k, v in view.items() if v is not None})
-    lines = [body] if body else []
+    paragraphs: list[str] = []
+    lines: list[str] = []
+    for key, value in view.items():
+        if value is None:
+            continue
+        text = encode({key: value})
+        if "\n" not in text:
+            lines.append(text)
+            continue
+        if lines:
+            paragraphs.append("\n".join(lines))
+            lines = []
+        paragraphs.append(text)
+    if lines:
+        paragraphs.append("\n".join(lines))
     if help_lines:
-        lines.append(f"help[{len(help_lines)}]:")
-        lines += [f"  - {encode({'h': line})[len('h: '):]}" for line in help_lines]
-    return "\n".join(lines)
+        paragraphs.append("\n".join([f"help[{len(help_lines)}]:"]
+                                    + [f"  - {encode({'h': line})[len('h: '):]}" for line in help_lines]))
+    return "\n\n".join(paragraphs)
 
 
 def render_json(view: dict[str, Any], help_lines: list[str] | None = None) -> str:

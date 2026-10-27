@@ -5226,7 +5226,7 @@ def cmd_catalog(args, cfg) -> None:
         if not rest:
             sys.exit("which endpoint? e.g. treg catalog get tikhub.tiktok.video.comments\n"
                      "find one with: treg catalog search <query>")
-        return _catalog_get(rest[0], cfg)
+        return _catalog_get(rest[0], cfg, limit=getattr(args, "limit", None) or 10)
     if args.platform == "request":
         return _catalog_request(" ".join(rest), cfg)
     if rest:
@@ -5916,7 +5916,7 @@ def _hub_view(e: dict) -> dict:
     }
 
 
-def _catalog_get(endpoint_id: str, cfg) -> None:
+def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
     """One endpoint, everything about it — the last stop before `treg call`."""
     with _client(cfg, auth=False) as c:
         r = c.get(f"/catalog/endpoints/{quote(endpoint_id, safe='')}")
@@ -5959,7 +5959,7 @@ def _catalog_get(endpoint_id: str, cfg) -> None:
         **_price_table_view(cost),
         "async": _async_view(e.get("async")),
         "example_response": body.get("example_response"),
-        **_compare_view(e, body, cfg),
+        **_compare_view(e, body, cfg, limit),
         "provider": f"{prov.get('display_name', e['provider'])} ({e['provider']})",
         "limits": prov.get("limits"),
         "pricing": prov.get("pricing_url"),
@@ -5968,8 +5968,13 @@ def _catalog_get(endpoint_id: str, cfg) -> None:
         else e.get("verified") or "not verified against the live API",
         "added": e.get("added"),
     }
+    help_lines = []
+    if view.get("compare_total") or view.get("also_total"):
+        help_lines.append(f"treg catalog get {e['id']} --limit 100   # every provider of {e.get('capability')}")
     others = [row["id"] for row in view.get("compare") or [] if row["id"] != e["id"]]
-    _emit(view, [f"treg catalog get {others[0]}   # the same job from another provider"] if others else None)
+    if others:
+        help_lines.append(f"treg catalog get {others[0]}   # the same job from another provider")
+    _emit(view, help_lines)
 
 
 def _access_detail(endpoint_id: str, cfg) -> str | None:
@@ -6080,10 +6085,11 @@ def _async_view(desc) -> dict | None:
             "lifetime": f"{result['ttl_note']}; download promptly, treg never stores media" if result.get("ttl_note") else None}
 
 
-def _compare_view(e: dict, body: dict, cfg) -> dict:
+def _compare_view(e: dict, body: dict, cfg, limit: int) -> dict:
     """The other ways to do this job. A routed id gets its plan (what `treg call` tries, in order, at
     treg's prices; own keys jump the queue at call time) and the providers it does not route to; any
-    other id gets a table of the job's providers, itself first, with what treg has measured."""
+    other id gets the job's providers, itself first, then the measured ones by success rate and price,
+    then the unmeasured, `limit` rows at most."""
     routing = body.get("routing") or {}
     if routing.get("plan"):
         plan = [{"id": c["endpoint_id"], "price": _usd_or_none(c.get("usd")),
@@ -6094,19 +6100,29 @@ def _compare_view(e: dict, body: dict, cfg) -> dict:
         also = [{"id": a["endpoint_id"], "price": _usd_or_none(a.get("usd"))} for a in routing.get("also") or []]
         return {"routes": cli_view.table(plan, ("id", "price", "accepts", "works", "hit", "skipped")),
                 "route_headers": routing.get("headers") or None,
-                "also": cli_view.table(also, ("id", "price")) or None}
+                "also_total": len(also) if len(also) > limit else None,
+                "also": cli_view.table(also[:limit], ("id", "price")) or None}
     sibs = body.get("siblings") or []
     if not sibs:
         return {}
     pinned = _pinned_provider(cfg, e.get("capability"))
+    others = sorted((s for s in sibs if not pinned or s["provider"] == pinned), key=_compare_rank)
     rows = [{"id": s["id"], "price": _cost_usd(s.get("cost")), "works": _pct((s.get("observed") or {}).get("ok_rate")),
              "calls": (s.get("observed") or {}).get("samples"), "hit": _pct((s.get("observed") or {}).get("hit_rate")),
              "p50": _duration((s.get("observed") or {}).get("p50_ms")),
              "last_ok_days": (s.get("observed") or {}).get("last_ok_days"), "verified": s.get("verified")}
-            for s in [e, *sibs] if not pinned or s["provider"] == pinned]
-    return {"compare": cli_view.table(rows, ("id", "price", "works", "calls", "hit", "p50", "last_ok_days", "verified")),
+            for s in [e, *others][:limit]]
+    return {"compare_total": len(others) + 1 if len(others) + 1 > limit else None,
+            "compare": cli_view.table(rows, ("id", "price", "works", "calls", "hit", "p50", "last_ok_days", "verified")),
             "pinned": f"your team pins this job to {pinned}; other providers are refused "
                       f"(admin: treg org unpin {e.get('capability')})" if pinned else None}
+
+
+def _compare_rank(s: dict) -> tuple:
+    """Measured before unmeasured; then the higher success rate, to the percent; then the lower price."""
+    rate = (s.get("observed") or {}).get("ok_rate")
+    usd = (s.get("cost") or {}).get("usd")
+    return (rate is None, -round(rate or 0, 2), usd if isinstance(usd, (int, float)) else float("inf"))
 
 
 def _pct(rate) -> str | None:
@@ -7089,7 +7105,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="a platform slug (tiktok, web, google, …), or `search <query>` / `get <endpoint-id>` / "
                          "`request <what's missing>`")
     ct.add_argument("rest", nargs="*", metavar="<args>", help="the search query, endpoint id, or request text")
-    ct.add_argument("--limit", type=int, default=25, help="search: how many results (default: 25, max 100)")
+    ct.add_argument("--limit", type=int, help="search: how many results (default: 25, max 100); "
+                    "get: how many providers to compare (default: 10)")
     ct.add_argument("--new", nargs="?", type=_catalog_new_days, const=30, default=None, metavar="DAYS",
                     help="search: only tools added in the last DAYS days (default 30, max 365); "
                          "words are optional")

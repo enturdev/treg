@@ -78,8 +78,9 @@ Every reader of the CLI is a coding agent. The home view and `catalog` in all it
 plain dict and print it through `_emit` (`cli_view.render`): the reference TOON encoder
 (`toon-format`), where a list of same-shaped rows becomes one `name[N]{field,…}:` table
 (`cli_view.table` gives every row the same keys, or the encoder falls back to a list of objects),
-followed by `help[N]:`, the next commands as a TOON list. The whole output decodes as TOON, which is
-how the tests read it. Nothing is clipped to fit a column: ids, prices, parameter names and notes
+followed by `help[N]:`, the next commands as a TOON list. Consecutive one-line fields form a
+paragraph and each table or nested block its own, with a blank line between them. The whole output
+decodes as TOON, which is how the tests read it. Nothing is clipped to fit a column: ids, prices, parameter names and notes
 print whole; only a list row's `name` is shortened (`_brief`), and `catalog get <id>` has the rest.
 A refusal is data too: `_fail` prints `error`, `message` and a `help` on stdout and exits 1
 (`_fail_response` for a non-2xx answer). `--json` on these commands prints the server's JSON as
@@ -520,8 +521,9 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   `native_price` and the whole `price_note`, `access` (which credential would serve this caller), the
   paste-ready `call`, `params` by location with required first (`_params_view`), any `price_table` and
   `async` descriptor, the `example_response`, then the alternatives: `routes` (the plan, in order) and
-  `also` on a routed id, otherwise `compare`, every provider of the job with itself first (`price`,
-  `works` over `calls`, `hit`, `p50`, `last_ok_days` measured from the last real success, `verified` the
+  `also` on a routed id, otherwise `compare`, the endpoint itself and then the job's other providers,
+  measured ones by success rate and price before the unmeasured, `--limit` rows (10 by default) with
+  `compare_total` when there are more (`price`, `works` over `calls`, `hit`, `p50`, `last_ok_days` measured from the last real success, `verified` the
   catalog's hand-run stamp). Provider limits, pricing and docs come last. `search`/`get` are matched as
   positional **verbs** inside `cmd_catalog`, not argparse subcommands, so `treg catalog <platform>`
   keeps working and a multi-word query needs no quoting. An id that misses is the `unknown_endpoint`

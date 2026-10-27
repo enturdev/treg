@@ -925,6 +925,23 @@ def test_catalog_get_renders_params_siblings_and_the_command(monkeypatch, capsys
     assert keys.index("call") < keys.index("params") < keys.index("compare"), "how to call before the alternatives"
 
 
+def test_catalog_get_compares_a_capped_ranked_few(monkeypatch, capsys):
+    """A job with dozens of providers shows the endpoint itself, then the measured ones by success
+    rate and price, then the unmeasured, up to the limit; the total and the command for all of them
+    stay on the page."""
+    def ep(i, rate=None, usd=0.01):
+        return {"id": f"p{i}.job", "provider": f"p{i}", "cost": {"type": "per_call", "usd": usd},
+                "observed": {"ok_rate": rate, "samples": 100} if rate is not None else None, "verified": None}
+    me = {**ep(0, 0.9), "summary": "s", "method": "GET", "path": "/x", "capability": "people.search"}
+    sibs = [ep(1), ep(2, 0.95, usd=0.02), ep(3, 0.95, usd=0.01), ep(4, 0.5)] + [ep(i) for i in range(5, 16)]
+    _stub_catalog_client(monkeypatch, {"/catalog/endpoints/p0.job": _CatalogResp(
+        {"endpoint": me, "provider": {}, "siblings": sibs, "call_template": "treg call p0.job"})})
+    cli.cmd_catalog(cli.build_parser().parse_args(["catalog", "get", "p0.job", "--limit", "4"]), {"base_url": "http://x"})
+    out = _toon(capsys)
+    assert [r["id"] for r in out["compare"]] == ["p0.job", "p3.job", "p2.job", "p4.job"]
+    assert out["compare_total"] == 16 and out["help"][0] == "treg catalog get p0.job --limit 100   # every provider of people.search"
+
+
 def test_a_credit_price_reads_as_dollars_with_the_credits_behind_it():
     """A bare credit count is not a price — a reader cannot compare "1 credit" to "$0.001". When
     the server priced the credit, dollars lead; only an unpriced credit shows alone."""
