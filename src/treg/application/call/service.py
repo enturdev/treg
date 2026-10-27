@@ -308,7 +308,8 @@ def _tool_called_props(request: _ApplicationRequest, *, tool_name: str, status_c
             "call_ref": call_ref, "outcome": _outcome(status_code, refused_by, answered=answered),
             "refused_by": refused_by, "cached": cached, "smoothed": smoothed, "hit": hit,
             "response_bytes": response_bytes, "user_agent": user_agent[:100],
-            "ua_family": _norm_client(user_agent)} | mcp_host(request.headers, client)
+            "ua_family": _norm_client(user_agent),
+            "client_version": request.headers.get("x-treg-client-version", "")[:32] or None} | mcp_host(request.headers, client)
 
 
 class _HeaderView:

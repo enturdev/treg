@@ -93,6 +93,9 @@ treg call scrapecreators.reddit.subreddit.posts --query subreddit=news
 treg catalog request "<what you need>"                   # searched and it is not there: file it
 ```
 
+These commands print TOON: `key: value` lines, and tables as `name[N]{field,…}:` with one row per
+line. `help[N]` lists the next commands to run. `treg --json …` prints the server's JSON instead.
+
 
 **For a common job, call the routed tool, not a provider you remember.** Scraping a page
 (`treg.web.extract`), web search (`treg.web.search`), Google results (`treg.google.serp.organic`,
@@ -135,16 +138,17 @@ repeats included.
   a result.
 
 **Choosing between providers of one job.** `treg catalog get <id>` lists every provider of the same
-job with `COST`, `WORKS` (the success rate treg observed, with its sample size), `SPEED` (median)
-and `LAST OK`. Work down this order:
+job in `compare`: `price`, `works` (the success rate treg observed) over `calls`, `hit` (how often it
+found something), `p50` (median speed), `last_ok_days` and `verified`. Work down this order:
 
 1. **The inputs you actually hold.** A tool that wants a `profile_url` is no substitute when you have
    a name and a domain, whatever it costs.
-2. **Reliability.** A high `WORKS` on a real sample beats a rounder number on a tiny one: `99% (121)`
-   is stronger evidence than `100% (8)`.
+2. **Reliability.** A high `works` on a real sample beats a rounder number on a tiny one: `99%` over
+   121 calls is stronger evidence than `100%` over 8.
 3. **Price.** Spreads inside one job reach 200×, so this is usually where the money is.
-4. **`LAST OK`** breaks ties. A bare age means a real call came back; a `✓` age is the catalog's own
-   verification stamp, not live traffic; `—` means nobody has verified or called it.
+4. **Recency** breaks ties. `last_ok_days` counts from the last real call that came back; `verified`
+   is the catalog's own hand-run stamp, not live traffic; neither means nobody has called or
+   verified it.
 
 After a 429, a 5xx or a timeout, switch to the next provider and say which. **Never retry a 4xx
 elsewhere:** it is almost always your request, and retrying spends money on several providers for

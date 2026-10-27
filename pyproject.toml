@@ -28,6 +28,7 @@ dependencies = [
     "httpx>=0.27",
     "posthog>=7.47.3",
     "questionary>=2.0",
+    "toon-format>=1.2",
 ]
 
 [project.optional-dependencies]
@@ -124,6 +125,7 @@ name = "Lightweight CLI modules do not import server dependencies"
 type = "forbidden"
 source_modules = [
     "treg.cli",
+    "treg.cli_view",
     "treg.convert",
     "treg.skills",
     "treg.providers",

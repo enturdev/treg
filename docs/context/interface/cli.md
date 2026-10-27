@@ -64,19 +64,26 @@ reads `/auth/me` for the account, then resolves the team the way `balance` and `
 team `/auth/me` names when `/orgs` refuses an agent key. `_active_org` (and `_active_org_id` on top
 of it) is that same order for every other command. Then `/orgs/{id}/balance?limit=1` and `/tools`,
 each under a short timeout. Each read stands alone (`_quietly`): one that fails or answers in an
-unexpected shape leaves out its own line, and the command always exits 0. The output is plain
-`key: value` lines (`bin`, `version`, `description`, `registry`, `account`, `team`, `balance`,
-`own_tools[N]`) ending in `help[N]`, runnable next commands with runtime values as `<placeholders>`
-(`_home_help`). A blocker leads the help: no treg registry at that URL (`treg config`), a registry
-5xx (run `treg` again), not signed in, a stale active team (`treg org ls` / `org use`), no team at
-all, or an empty balance (`treg topup`).
+unexpected shape leaves out its own line, and the command always exits 0. The view (`bin`,
+`version`, `description`, `registry`, `account`, `team`, `role`, `balance`, `own_tools`) ends in
+`help`, runnable next commands with runtime values as `<placeholders>` (`_home_help`). A blocker
+leads the help: no treg registry at that URL (`treg config`), a registry 5xx (run `treg` again), not
+signed in, a stale active team (`treg org use`), no team at all, or an empty balance (`treg topup`).
 `--json` prints the same state as one object with `balance_micro` and a `help` list.
 
-`catalog search` says how routed rows work once, as a `hint:` line below the table (only when a
-routed row printed); inside the table an indented sentence read like one more row. The last line,
-`next:`, names `treg catalog get <id>` with the first row as the example.
-Every `▸` row keeps its provider count (`ROUTED (26 providers)`): only a few children print, so the
-count is where an agent learns how many the routed id draws on.
+## Output for agents: TOON views
+
+Every reader of the CLI is a coding agent. The home view and `catalog` in all its forms build a
+plain dict and print it through `_emit` (`cli_view.render`): the reference TOON encoder
+(`toon-format`), where a list of same-shaped rows becomes one `name[N]{field,…}:` table
+(`cli_view.table` gives every row the same keys, or the encoder falls back to a list of objects),
+followed by `help[N]:`, the next commands as a TOON list. The whole output decodes as TOON, which is
+how the tests read it. Nothing is clipped to fit a column: ids, prices, parameter names and notes
+print whole; only a list row's `name` is shortened (`_brief`), and `catalog get <id>` has the rest.
+A refusal is data too: `_fail` prints `error`, `message` and a `help` on stdout and exits 1
+(`_fail_response` for a non-2xx answer). `--json` on these commands prints the server's JSON as
+received, a 404 included. A routed row's price is `variable` (`_cost_usd` on `cost.varies`): its
+children's misses are billed, so it is never shown as free.
 
 ## Pasted-key connect
 
@@ -119,7 +126,7 @@ Every command/subcommand carries a `description` + `help` on each argument + a c
 epilog (a `mk()` helper + `_ex()` + `RawDescriptionHelpFormatter`), so `treg <cmd> -h` is self-teaching.
 `treg --version` / `treg version` print `cli_version()` (package metadata); `treg update` (`cmd_update`)
 re-runs the server's `install.sh` to upgrade the CLI in place. A global **`--json`** flag (stripped in
-`main` like `--org`; both last one `main()` call, reset on entry and exit) makes the human-table commands (`org ls`, `agents ls`, `catalog` in all its forms)
+`main` like `--org`; both last one `main()` call, reset on entry and exit) makes the commands that print a view (`org ls`, `agents ls`, `catalog` in all its forms)
 emit raw JSON instead — one stable contract for agents. On `call` (not `--await`) it prints one
 compact envelope, `{"result": <body>, "_treg": {http_status, call_id, charged_micro | reserved_micro,
 replay?, async?, hint?, treg_saturated?, retry_after_seconds?}}` (`_call_envelope`; text as a
@@ -491,32 +498,33 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   `catalog_search` gets, judged where the judge runs, else the keyword page; the login token, when
   there is one, says who is searching for the per-caller judge cap; an older server ignores
   `engine` and answers by keyword). A `none` verdict prints "the catalog has no tool for" and the
-  request line, `closest` and a judge-less `keyword` page say so under the table. A compact ranked table: endpoint id,
-  platform, provider, cost, `✓`/`·` verified, tier, clipped summary — footer hint `treg catalog get <id>`.
-  Cost prints in **USD** (`_cost_usd`, 3 significant digits) rather than `_cost_label`'s source currency:
-  the column is only worth reading if CNY and USD rows compare. The no-match message names
-  `treg catalog request "<query>"` — the empty search is the moment the filer exists. An ADDED
-  column shows each tool's `added` day (`-` on a routed row). `--new [DAYS]` (30 when bare, capped
+  request line, `closest` and a judge-less `keyword` page say so in `note`. `results` holds `id`,
+  `job`, `price`, `name`, plus `own_key` when a row is callable on the team's own key and `added`
+  for a `--new`/newest search; `routed` explains a `treg.<job>` row once. Price prints in **USD**
+  (`_cost_usd`, 3 significant digits) rather than `_cost_label`'s source currency, so CNY and USD
+  rows compare. The no-match answer names `treg catalog request "<query>"` in its help: the empty
+  search is the moment the filer exists. `--new [DAYS]` (30 when bare, capped
   at 365 with one line saying so) keeps tools added in the last DAYS days and `--sort newest` lists
   newest first; with either, the words are optional (`treg catalog search --new`). `--new` takes a
-  number, so search words go before it. An older server that ignores both options gets "this
-  server does not support --new yet", not plain results labelled as new. `catalog get` prints `added`.
+  number, so search words go before it. An older server that ignores both options gets the
+  `unsupported` error, not plain results labelled as new.
 - **`catalog request <what's missing…>`** (`_catalog_request`) — file a "the catalog doesn't have X"
   report (`POST /tool-requests`, `source: cli`). Open endpoint, rate-limited server-side; a configured
   token rides along as attribution only, never a requirement.
 - **`catalog get <endpoint-id>`** (`_catalog_get`) — the last stop before `treg call`
-  (`GET /catalog/endpoints/{id}`): summary, provider + limits/pricing_url, cost in USD *and* the original
-  currency with its note, verified date, the capability with a **siblings** table (same job, other
-  providers — price and verification side by side), a `PARAMS` table by location with required first
-  (`_print_params`), the paste-ready `RUN IT` command, and the example response pretty-printed, clipped at
-  40 lines with a pointer to the full JSON. `search`/`get` are matched as positional **verbs** inside
-  `cmd_catalog`, not argparse subcommands, so `treg catalog <platform>` keeps working and a multi-word
-  query needs no quoting. An id that misses prints the server's `did_you_mean` ids and the exact
-  command for the first one; the old "find one with: treg catalog search …" is the fallback for a
-  miss that resembles nothing, since it sends the reader back to the step that produced the wrong id.
-  The siblings table's `WORKS` cell shows a measured `0%` for an endpoint whose decided calls all
-  failed; below the sample floor it stays the neutral `— (n)`, because the floor publishes volume and
-  never outcome.
+  (`GET /catalog/endpoints/{id}`), in the order an agent acts on it: what it does, `price` in USD with
+  `native_price` and the whole `price_note`, `access` (which credential would serve this caller), the
+  paste-ready `call`, `params` by location with required first (`_params_view`), any `price_table` and
+  `async` descriptor, the `example_response`, then the alternatives: `routes` (the plan, in order) and
+  `also` on a routed id, otherwise `compare`, every provider of the job with itself first (`price`,
+  `works` over `calls`, `hit`, `p50`, `last_ok_days` measured from the last real success, `verified` the
+  catalog's hand-run stamp). Provider limits, pricing and docs come last. `search`/`get` are matched as
+  positional **verbs** inside `cmd_catalog`, not argparse subcommands, so `treg catalog <platform>`
+  keeps working and a multi-word query needs no quoting. An id that misses is the `unknown_endpoint`
+  error with the server's `did_you_mean` ids and the command for the first one, or a search built from
+  the id's words when nothing resembles it. `works` is a measured `0%` for an endpoint whose decided
+  calls all failed and absent below the sample floor, because the floor publishes volume and never
+  outcome.
 - **`mcp grants`** / **`mcp use-team <grant> <team>`** (`cmd_mcp_grants`, `cmd_mcp_use_team`) — which
   MCP connections this account has authorised, and which team's balance each one spends from; and
   moving one, without reconnecting the client. The grant id prints **whole** while every other column
@@ -616,9 +624,8 @@ stored token when a deliberate team switch succeeds.
 `treg org overflow [on|off]` shows or sets the team's overflow-relay opt-out (`PATCH /orgs/{id}/settings`
 `platform_overflow`); see `ops/capacity.md`.
 
-`treg catalog get <routed id>` prints the ROUTING PLAN (order, accepted identity, price, HIT, expected
-cost per hit) above the sibling table; the sibling table itself gained a HIT column (`stats.observed`
-`hit_rate`). `treg catalog <platform>` rows lead with the endpoint id and show the unified USD price.
+`treg catalog <platform>` lists the platform's `jobs` and its `endpoints` (`id`, `job`, `price`,
+`name`), with the unified USD price.
 
 ## Anonymous CLI analytics
 
