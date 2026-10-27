@@ -127,8 +127,9 @@ repeats included.
   a result.
 
 **Choosing between providers of one job.** `treg catalog get <id>` compares the providers of the same
-job in `compare` (the ten most reliable and cheapest; `--limit 100` lists them all): `price`, `works` (the success rate treg observed) over `calls`, `hit` (how often it
-found something), `p50` (median speed), `last_ok_days` and `verified`. Work down this order:
+job in `compare` (the ten most reliable and cheapest; `--limit 100` lists them all): `price`, `works`
+(the success rate treg observed) over `calls`, `hit` (how often it found something), `p50` (median
+speed), `last_ok_days` and `verified`. Work down this order:
 
 1. **The inputs you actually hold.** A tool that wants a `profile_url` is no substitute when you have
    a name and a domain, whatever it costs.
