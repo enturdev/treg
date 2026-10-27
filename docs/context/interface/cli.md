@@ -3,6 +3,7 @@ title: The CLI (treg) + skill scaffolding
 status: shipped
 sources:
   - src/treg/cli.py
+  - src/treg/cli_view.py
   - tests/test_released_cli_compat.py
   - tests/test_cli_key_compatibility.py
   - src/treg/routers/auth_helpers.py
@@ -83,7 +84,10 @@ print whole; only a list row's `name` is shortened (`_brief`), and `catalog get 
 A refusal is data too: `_fail` prints `error`, `message` and a `help` on stdout and exits 1
 (`_fail_response` for a non-2xx answer). `--json` on these commands prints the server's JSON as
 received, a 404 included. A routed row's price is `variable` (`_cost_usd` on `cost.varies`): its
-children's misses are billed, so it is never shown as free.
+children's misses are billed, so it is never shown as free. `_client` sends `X-Treg-Client-Version`
+(the CLI release) beside `X-Treg-Client`; `tool_called` records it as `client_version`, so an output
+change can be compared across the releases in use. Like every `x-treg-*` header, it never reaches the
+upstream.
 
 ## Pasted-key connect
 
