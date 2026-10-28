@@ -65,7 +65,9 @@ The separate [exact org/endpoint allowance](org-endpoint-quota.md) runs inside t
 application after canonical resolution and local/money admission, immediately before returning
 a cache hit or sending a direct/overflow request. It counts logical admissions across credential
 tiers and releases unused holds on refusal. An exhausted child may be skipped for another routed
-candidate; unknown state stops that waterfall. Optional verification preserves the find result.
+candidate. Redis uncertainty allows calls, including previously restricted targets, without
+repairing counters; operators can set limits again after loss. Optional verification preserves
+the find result on a known refusal.
 
 Named catalog calls with authorization metadata select the provider and grant method before
 comparing hosts. This separates Facebook and Instagram tools sharing `graph.facebook.com`;

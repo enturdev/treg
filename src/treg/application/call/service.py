@@ -671,6 +671,18 @@ def _quota_targets(request: _ApplicationRequest, endpoint_id: str) -> tuple[tupl
         if candidate not in request.context.quota_admissions))
 
 
+_quota_warning_at: float | None = None
+
+
+def _warn_quota_unavailable() -> None:
+    global _quota_warning_at
+    now = time.monotonic()
+    if _quota_warning_at is None or now - _quota_warning_at >= 60:
+        _quota_warning_at = now
+        logging.getLogger("treg.org_endpoint_quota").warning(
+            "Temporary endpoint quota state unavailable; allowing logical call")
+
+
 async def _admit_org_endpoint(request: _ApplicationRequest, endpoint_id: str) -> None:
     targets = _quota_targets(request, endpoint_id)
     if not targets:
@@ -681,17 +693,17 @@ async def _admit_org_endpoint(request: _ApplicationRequest, endpoint_id: str) ->
         outcome, failed_target = await org_endpoint_quota.admit(*targets[0]), targets[0]
     else:
         outcome, failed_target = await org_endpoint_quota.admit_many(targets)
-    if outcome == "allowed":
+    if outcome in {"allowed", "unavailable"}:
+        if outcome == "unavailable":
+            _warn_quota_unavailable()
         request.context.quota_admissions.update(targets)
         return
     request.state.call_cost_micro = 0
-    exceeded = outcome == "exceeded"
-    kind = "org_endpoint_quota_exceeded" if exceeded else "org_endpoint_quota_unavailable"
+    kind = "org_endpoint_quota_exceeded"
     request.context.refused_by = "policy"
-    raise AuthorizationFailed(kind, status_code=429 if exceeded else 503, detail={
+    raise AuthorizationFailed(kind, status_code=429, detail={
         "error": kind, "endpoint_id": (failed_target or targets[0])[1],
-        "message": "The organization's allowance for this endpoint is exhausted." if exceeded
-        else "Unable to confirm this endpoint's call allowance.",
+        "message": "The organization's allowance for this endpoint is exhausted.",
     })
 
 

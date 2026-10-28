@@ -21,19 +21,26 @@ local function integer(value, low)
     return type(value) == 'number' and value >= low and value <= 2147483647
         and value == math.floor(value)
 end
+local function read_rule(raw)
+    if string.len(raw) > 1024 then return nil end
+    local ok, state = pcall(cjson.decode, raw)
+    if not ok or type(state) ~= 'table' then return nil end
+    local count = 0
+    for _ in pairs(state) do count = count + 1 end
+    if count ~= 4 or not integer(state.version, 1)
+        or not integer(state.limit, 0) or not integer(state.used, 0)
+        or type(state.enabled) ~= 'boolean' then return nil end
+    return state
+end
 local writes = {}
+local unknown = 0
 for i, field in ipairs(ARGV) do
     local raw = redis.call('HGET', KEYS[1], field)
     if raw then
-        if string.len(raw) > 1024 then return {2, i} end
-        local ok, state = pcall(cjson.decode, raw)
-        if not ok or type(state) ~= 'table' then return {2, i} end
-        local count = 0
-        for _ in pairs(state) do count = count + 1 end
-        if count ~= 4 or not integer(state.version, 1)
-            or not integer(state.limit, 0) or not integer(state.used, 0)
-            or type(state.enabled) ~= 'boolean' then return {2, i} end
-        if state.enabled then
+        local state = read_rule(raw)
+        if not state then
+            if unknown == 0 then unknown = i end
+        elseif state.enabled then
             if state.used >= state.limit then return {1, i} end
             state.used = state.used + 1
             table.insert(writes, field)
@@ -42,6 +49,7 @@ for i, field in ipairs(ARGV) do
     end
 end
 if #writes > 0 then redis.call('HSET', KEYS[1], unpack(writes)) end
+if unknown > 0 then return {2, unknown} end
 return {0}
 """
 
@@ -83,7 +91,7 @@ class RedisQuotaStore:
                 return ("exceeded" if result[0] == 1 else "unavailable",
                         unique[result[1] - 1])
             return "unavailable", unique[0]
-        except Exception:  # noqa: BLE001 - unknown admission must not run or retry a paid call
+        except Exception:  # noqa: BLE001 - report unknown state without retrying a possible increment
             return "unavailable", unique[0]
 
     async def aclose(self) -> None:
@@ -106,7 +114,7 @@ async def admit_many(targets: tuple[Target, ...]) -> tuple[Outcome, Target | Non
         if _store is None:
             _store = RedisQuotaStore(get_settings().org_endpoint_quota_redis_url)
         return await _store.admit_many(targets)
-    except Exception:  # noqa: BLE001 - includes unavailable client initialization, never fail open
+    except Exception:  # noqa: BLE001 - application chooses availability on unknown quota state
         return "unavailable", targets[0] if targets else None
 
 

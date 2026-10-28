@@ -89,7 +89,7 @@ async def test_zero_quota_and_exact_pairs_and_disabled_tombstone(store):
     assert (await state(store))["used"] == 5
 
 
-async def test_parent_and_child_admission_is_all_or_nothing(store):
+async def test_healthy_parent_and_child_admission_is_all_or_nothing(store):
     parent = (42, "example.route")
     child = (42, "example.read")
     await put_rule(store, endpoint=parent[1], limit=5)
@@ -107,7 +107,37 @@ async def test_parent_and_child_admission_is_all_or_nothing(store):
     assert (await state(store))["used"] == 1
     await store._client.hset(quota.KEY, "rule:42:example.read", '{"used":null}')
     assert await store.admit_many((parent, child)) == ("unavailable", child)
-    assert (await state(store, endpoint=parent[1]))["used"] == 1
+    assert (await state(store, endpoint=parent[1]))["used"] == 2
+    assert await store._client.hget(quota.KEY, "rule:42:example.read") == '{"used":null}'
+
+
+@pytest.mark.parametrize("unknown_first", [True, False])
+async def test_unknown_rule_never_masks_another_known_exhausted_target(store, unknown_first):
+    parent, child = (42, "example.route"), (42, "example.read")
+    await store._client.hset(quota.KEY, "rule:42:example.route", '{"used":null}')
+    await put_rule(store, limit=0)
+    targets = (parent, child) if unknown_first else (child, parent)
+    assert await store.admit_many(targets) == ("exceeded", child)
+    assert (await state(store))["used"] == 0
+    assert await store._client.hget(quota.KEY, "rule:42:example.route") == '{"used":null}'
+
+
+async def test_concurrent_unknown_parent_preserves_known_child_allowance(store):
+    other = quota.RedisQuotaStore(
+        "unix://" + store._client.connection_pool.connection_kwargs["path"])
+    parent, child = (42, "example.route"), (42, "example.read")
+    await store._client.hset(quota.KEY, "rule:42:example.route", '{"used":null}')
+    await put_rule(store, limit=17)
+    try:
+        results = await asyncio.gather(*[
+            (store if i % 2 else other).admit_many((parent, child)) for i in range(80)
+        ])
+        assert results.count(("unavailable", parent)) == 17
+        assert results.count(("exceeded", child)) == 63
+        assert (await state(store))["used"] == 17
+        assert await store._client.hget(quota.KEY, "rule:42:example.route") == '{"used":null}'
+    finally:
+        await other.aclose()
 
 
 async def test_concurrent_parent_child_batches_never_partially_consume(store):
@@ -167,7 +197,7 @@ async def test_invalid_targets_do_not_touch_redis(org, endpoint):
     assert await store.admit(org, endpoint) == "unavailable"
 
 
-async def test_unknown_transport_outcome_is_not_retried_or_allowed():
+async def test_unknown_transport_outcome_is_reported_without_retry():
     calls = 0
 
     async def uncertain(*args):
@@ -191,7 +221,7 @@ async def test_cancellation_propagates():
         await store.admit(42, "example.read")
 
 
-async def test_enabled_client_initialization_failure_is_closed(monkeypatch):
+async def test_enabled_client_initialization_failure_is_reported(monkeypatch):
     def broken(_url):
         raise RuntimeError("client unavailable")
 

@@ -129,23 +129,25 @@ async def test_discovery_in_a_synthetic_route_plan_has_endpoint_local_quota(
         if before_outbound := kwargs.pop("before_outbound", None):
             await before_outbound()
         sent.append(upstream_url)
-        return await _fake_relay(200, b'{"data":"synthetic"}')(
+        body = (b'{"accounts":[{"user_id":"synthetic"}],"total":1,"credits_cost":0.01}'
+                if "influencers.club" in upstream_url else b'{"data":"synthetic"}')
+        return await _fake_relay(200, body)(
             request, upstream_url, *args, **kwargs)
 
     relay = AsyncMock(side_effect=send)
     monkeypatch.setattr(call_service, "relay", relay)
     before = await _balance(clients)
     response = await clients.post(f"/call/{FIND}", json=ASK)
-    assert response.status_code == (503 if unavailable else 200), response.text
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["output"]["email"] == "synthetic@example.com"
     if unavailable:
-        assert response.json()["detail"]["error"] == "org_endpoint_quota_unavailable"
-        assert response.headers["X-Treg-Cost-Micro"] == "0"
+        assert result["_treg"]["served_by"] == SEARCH
         assert attempts == {FIND: 1, SEARCH: 1}
-        assert await _balance(clients) == before
-        assert sent == []
+        charged = int(response.headers["X-Treg-Cost-Micro"])
+        assert charged > 0 and before - await _balance(clients) == charged
+        assert len(sent) == 1 and "influencers.club" in sent[0]
     else:
-        result = response.json()
-        assert result["output"]["email"] == "synthetic@example.com"
         assert result["_treg"]["served_by"] == EP
         assert result["_treg"]["tried"][0]["outcome"] == "skipped"
         assert result["_treg"]["tried"][0]["charged_micro"] == 0
@@ -155,7 +157,7 @@ async def test_discovery_in_a_synthetic_route_plan_has_endpoint_local_quota(
     holds, entries = await _money()
     assert not holds
     settled = {entry.call_id for entry in entries if entry.kind == "settle"}
-    assert settled == (set() if unavailable else {response.headers["X-Treg-Call-Id"] + ":r1"})
+    assert settled == {response.headers["X-Treg-Call-Id"] + (":r0" if unavailable else ":r1")}
 
 
 @pytest.mark.parametrize("allow_fail", [False, True])

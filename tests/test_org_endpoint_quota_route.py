@@ -13,7 +13,7 @@ from treg.models import Hold, LedgerEntry
 from test_marketplace_call import _balance, platform_on  # noqa: F401
 from test_org_endpoint_quota_call import _enable
 from test_route_verify import (
-    ASK, FIND, ON, TOMBA_FIND_PRICE, TOMBA_HIT, VERIFY, _relay,
+    ASK, FIND, ON, TOMBA_FIND_PRICE, TOMBA_HIT, VERIFY, _bb, _relay,
     verifiers_on,  # noqa: F401
 )
 
@@ -66,28 +66,27 @@ async def test_exhausted_candidate_skips_to_an_unrestricted_finder(
     assert await _settled_ids() == {response.headers["X-Treg-Call-Id"] + ":r1"}
 
 
-async def test_unavailable_candidate_stops_the_primary_waterfall(
+async def test_unavailable_quota_allows_the_primary_candidate_and_normal_charge(
     clients, monkeypatch, verifiers_on,
 ):
     attempts, _ = _refuse(monkeypatch, "tomba.people.email.find", "unavailable")
     seen = []
-    monkeypatch.setattr(call_service, "relay", _relay({}, seen))
+    monkeypatch.setattr(call_service, "relay", _relay({"tomba": [TOMBA_HIT]}, seen))
     before = await _balance(clients)
     response = await clients.post(f"/call/{FIND}", json=ASK,
                                   headers={"X-Treg-Route-Prefer": "tomba,hunter"})
-    assert response.status_code == 503, response.text
-    assert response.json()["detail"]["error"] == "org_endpoint_quota_unavailable"
-    assert seen == [] and attempts["hunter.people.email.find"] == 0
-    assert before == await _balance(clients)
-    assert await _settled_ids() == set()
+    assert response.status_code == 200, response.text
+    assert response.json()["_treg"]["served_by"] == "tomba.people.email.find"
+    assert seen == ["tomba"] and attempts["hunter.people.email.find"] == 0
+    assert attempts["tomba.people.email.find"] == 1
+    assert before - await _balance(clients) == TOMBA_FIND_PRICE
+    assert await _settled_ids() == {response.headers["X-Treg-Call-Id"] + ":r0"}
 
 
 @pytest.mark.parametrize("checker", [VERIFY, "tomba.people.email.verify"])
-@pytest.mark.parametrize("outcome,reason", [
-    ("exceeded", "quota_exceeded"), ("unavailable", "quota_unavailable"),
-])
-async def test_optional_checker_quota_failure_preserves_find_and_its_settlement(
-    clients, monkeypatch, verifiers_on, checker, outcome, reason,
+@pytest.mark.parametrize("outcome", ["exceeded", "unavailable"])
+async def test_optional_checker_quota_policy_preserves_find_and_correct_settlement(
+    clients, monkeypatch, verifiers_on, checker, outcome,
 ):
     contract = catalog_store.load().contracts["people.email.find"]
     original_check = contract.check
@@ -95,20 +94,36 @@ async def test_optional_checker_quota_failure_preserves_find_and_its_settlement(
     try:
         attempts, _ = _refuse(monkeypatch, checker, outcome)
         seen = []
-        monkeypatch.setattr(call_service, "relay", _relay({"tomba": [TOMBA_HIT]}, seen))
+        valid = (200, {"data": {"email": {"status": "valid", "score": 99}}})
+        monkeypatch.setattr(call_service, "relay", _relay({
+            "tomba": [TOMBA_HIT], "tomba-verify": [valid], "bounceban": [_bb("deliverable")],
+        }, seen))
         before = await _balance(clients)
         response = await clients.post(f"/call/{FIND}", json=ASK, headers=ON)
         assert response.status_code == 200, response.text
         result = response.json()
         assert result["output"]["email"] == TOMBA_HIT[1]["data"]["email"]
-        assert result["_treg"]["verification"] == {
-            "verdict": "unknown", "checked": False, "served_by": None,
-            "cost_micro": 0, "reason": reason,
-        }
-        assert seen == ["tomba"] and attempts[checker] == 1
-        assert before - await _balance(clients) == TOMBA_FIND_PRICE
-        assert result["_treg"]["charged_micro"] == TOMBA_FIND_PRICE
-        assert await _settled_ids() == {response.headers["X-Treg-Call-Id"] + ":r0"}
+        verification = result["_treg"]["verification"]
+        call_id = response.headers["X-Treg-Call-Id"]
+        settled = {call_id + ":r0"}
+        if outcome == "exceeded":
+            assert verification == {
+                "verdict": "unknown", "checked": False, "served_by": None,
+                "cost_micro": 0, "reason": "quota_exceeded",
+            }
+            assert seen == ["tomba"]
+        else:
+            assert verification["checked"] is True and verification["verdict"] == "valid"
+            assert verification["cost_micro"] > 0
+            expected = "bounceban.people.email.verify" if checker == VERIFY else checker
+            assert verification["served_by"] == expected
+            assert seen == ["tomba", "bounceban" if checker == VERIFY else "tomba-verify"]
+            settled.add(call_id + (":v:r0" if checker == VERIFY else ":v"))
+        assert attempts[checker] == 1
+        charged = TOMBA_FIND_PRICE + verification["cost_micro"]
+        assert before - await _balance(clients) == charged
+        assert result["_treg"]["charged_micro"] == charged
+        assert await _settled_ids() == settled
     finally:
         object.__setattr__(contract, "check", original_check)
 
@@ -135,21 +150,24 @@ async def test_exhausted_verifier_candidate_uses_an_unrestricted_checker(
     assert await _settled_ids() == {call_id + ":r0", call_id + ":v:r1"}
 
 
-async def test_unavailable_verifier_stops_its_waterfall_but_preserves_the_find(
+async def test_unavailable_verifier_quota_allows_check_and_preserves_the_find(
     clients, monkeypatch, verifiers_on,
 ):
     attempts, _ = _refuse(monkeypatch, "bounceban.people.email.verify", "unavailable")
     seen = []
-    monkeypatch.setattr(call_service, "relay", _relay({"tomba": [TOMBA_HIT]}, seen))
+    monkeypatch.setattr(call_service, "relay", _relay(
+        {"tomba": [TOMBA_HIT], "bounceban": [_bb("deliverable")]}, seen))
     before = await _balance(clients)
     response = await clients.post(f"/call/{FIND}", json=ASK, headers=ON)
     assert response.status_code == 200, response.text
     result = response.json()
     assert result["output"]["email"] == TOMBA_HIT[1]["data"]["email"]
-    assert result["_treg"]["verification"] == {
-        "verdict": "unknown", "checked": False, "served_by": None,
-        "cost_micro": 0, "reason": "quota_unavailable",
-    }
-    assert seen == ["tomba"] and attempts["tomba.people.email.verify"] == 0
-    assert before - await _balance(clients) == TOMBA_FIND_PRICE
-    assert await _settled_ids() == {response.headers["X-Treg-Call-Id"] + ":r0"}
+    verification = result["_treg"]["verification"]
+    assert verification["checked"] is True and verification["verdict"] == "valid"
+    assert verification["served_by"] == "bounceban.people.email.verify"
+    assert verification["cost_micro"] > 0
+    assert seen == ["tomba", "bounceban"] and attempts["tomba.people.email.verify"] == 0
+    charged = TOMBA_FIND_PRICE + verification["cost_micro"]
+    assert before - await _balance(clients) == charged
+    call_id = response.headers["X-Treg-Call-Id"]
+    assert await _settled_ids() == {call_id + ":r0", call_id + ":v:r0"}

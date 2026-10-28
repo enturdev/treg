@@ -21,7 +21,7 @@ from test_bounceban_async import (
 from test_capacity_overflow import (
     O, OK_ANSWER, _exhausted, _orthogonal, _route, overflow_on,  # noqa: F401
 )
-from test_marketplace_call import EP, _balance, _fake_relay, platform_on  # noqa: F401
+from test_marketplace_call import EP, EP_MICRO, _balance, _fake_relay, platform_on  # noqa: F401
 from test_mcp import _call_tool, mcp_session
 from test_route_verify import ASK, FIND, ON, TOMBA_HIT, _relay, verifiers_on  # noqa: F401
 
@@ -76,14 +76,14 @@ async def _reject_before_send(*args, before_outbound=None, **kwargs):
 @pytest.mark.parametrize("surface", ["call", "catalog/call", "table"])
 @pytest.mark.parametrize("unavailable,status,code", [
     (False, 429, "org_endpoint_quota_exceeded"),
-    (True, 503, "org_endpoint_quota_unavailable"),
+    (True, 200, None),
 ])
-async def test_denial_releases_money_without_serving_or_upstream(
+async def test_known_exhaustion_refuses_but_unavailable_quota_allows_each_surface(
     clients, monkeypatch, platform_on, surface, unavailable, status, code,
 ):
     monkeypatch.setattr(get_settings(), "table_enabled", True)
     attempts, _ = _enable(monkeypatch, {EP: 0}, unavailable=unavailable)
-    relay = AsyncMock(side_effect=_reject_before_send)
+    relay = AsyncMock(side_effect=_fake_relay(200) if unavailable else _reject_before_send)
     cache = AsyncMock(return_value=None)
     overflow = AsyncMock(side_effect=AssertionError("overflow must not run"))
     monkeypatch.setattr(call_service, "relay", relay)
@@ -92,13 +92,19 @@ async def test_denial_releases_money_without_serving_or_upstream(
     before = await _balance(clients)
     response = await clients.get(f"/{surface}/{EP}?aweme_id=7")
     assert response.status_code == status, response.text
-    assert response.json()["detail"]["error"] == code
-    assert response.headers["X-Treg-Cost-Micro"] == "0"
+    if code is not None:
+        assert response.json()["detail"]["error"] == code
+    charged = EP_MICRO if unavailable else 0
+    assert int(response.headers["X-Treg-Cost-Micro"]) == charged
     assert attempts == {EP: 1}
-    assert await _balance(clients) == before
+    assert before - await _balance(clients) == charged
     relay.assert_awaited_once()
     overflow.assert_not_called()
-    await _assert_no_money()
+    if unavailable:
+        async with session_maker() as db:
+            assert (await db.execute(select(Hold))).scalars().all() == []
+    else:
+        await _assert_no_money()
 
 
 async def test_mcp_uses_same_quota_gate(clients, monkeypatch, platform_on):
@@ -110,6 +116,19 @@ async def test_mcp_uses_same_quota_gate(clients, monkeypatch, platform_on):
     assert out["body"]["detail"]["error"] == "org_endpoint_quota_exceeded"
     assert attempts == {EP: 1}
     await _assert_no_money()
+
+
+async def test_mcp_allows_unavailable_temporary_quota(clients, monkeypatch, platform_on):
+    attempts, used = _enable(monkeypatch, {EP: 0}, unavailable=True)
+    monkeypatch.setattr(call_service, "relay", _fake_relay(200))
+    before = await _balance(clients)
+    token = clients.headers["X-Treg-Token"]
+    async with mcp_session(clients) as client:
+        out = await _call_tool(client, "call", {"endpoint_id": EP, "params": {"aweme_id": "7"}}, token=token)
+    assert out["status"] == 200, out
+    assert attempts == {EP: 1} and used == {}
+    clients.headers["X-Treg-Token"] = token
+    assert before - await _balance(clients) == EP_MICRO
 
 
 async def test_replay_does_not_consume_but_next_logical_call_does(clients, monkeypatch, platform_on):
@@ -143,6 +162,23 @@ async def test_cache_hit_consumes_one_and_exhaustion_cannot_serve_cache(clients,
     assert third.status_code == 429
     assert attempts == {EP: 3} and used == {EP: 2}
     assert await _balance(clients) == balance
+
+
+async def test_cache_hit_remains_available_when_quota_state_is_unknown(clients, monkeypatch, serve):
+    _enable(monkeypatch, {EP: 1})
+    monkeypatch.setattr(call_service, "relay", _fake_relay(200, b'{"answer":"synthetic"}'))
+    url = f"/call/{EP}?aweme_id=7"
+    assert (await clients.get(url)).status_code == 200
+    await archive.drain()
+    attempts, used = _enable(monkeypatch, {EP: 0}, unavailable=True)
+    relay = AsyncMock(side_effect=AssertionError("cache hit must not send another provider call"))
+    monkeypatch.setattr(call_service, "relay", relay)
+    before = await _balance(clients)
+    response = await clients.get(url)
+    assert response.status_code == 200 and response.headers["X-Treg-Cache"] == "hit"
+    assert attempts == {EP: 1} and used == {}
+    assert before - await _balance(clients) == int(response.headers["X-Treg-Cost-Micro"])
+    relay.assert_not_awaited()
 
 
 async def test_no_rule_passes_and_upstream_failure_keeps_admission(clients, monkeypatch, platform_on):

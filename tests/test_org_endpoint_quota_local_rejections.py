@@ -14,8 +14,8 @@ from treg.infra import org_endpoint_quota
 from treg.infra.upstream import health
 from treg.models import Hold, LedgerEntry, Org, OverflowSpend
 
-from test_capacity_overflow import O, _exhausted, _route, overflow_on  # noqa: F401
-from test_marketplace_call import EP, _balance, platform_on  # noqa: F401
+from test_capacity_overflow import O, OK_ANSWER, _exhausted, _orthogonal, _route, overflow_on  # noqa: F401
+from test_marketplace_call import EP, _balance, _fake_relay, platform_on  # noqa: F401
 from test_org_endpoint_quota_call import _enable
 from test_route_verify import ASK, FIND, verifiers_on  # noqa: F401
 from test_tag_billing import _set_budget
@@ -150,32 +150,42 @@ async def test_skip_direct_local_admission_does_not_consume_allowance(
 
 @pytest.mark.parametrize("skip_direct", [False, True])
 @pytest.mark.parametrize("unavailable", [False, True])
-async def test_quota_refusal_releases_existing_direct_or_overflow_hold(
+async def test_direct_or_overflow_holds_follow_exhaustion_and_unavailability(
     clients, monkeypatch, overflow_on, skip_direct, unavailable,
 ):
     if skip_direct:
         await _route(price_micro=3000)
         await _exhausted()
     attempts, used = _enable(monkeypatch, {EP: 0}, unavailable=unavailable)
-    outbound = AsyncMock(side_effect=AssertionError("quota refusal cannot make a provider call"))
+    refusal = AssertionError("quota refusal cannot make a provider call")
+    outbound = AsyncMock(side_effect=_fake_relay(200) if unavailable else refusal)
+    overflow_outbound = AsyncMock(side_effect=_orthogonal([OK_ANSWER], []) if unavailable else refusal)
 
     async def relay(*args, before_outbound=None, **kwargs):
         if before_outbound is not None:
             await before_outbound()
-        await outbound()
+        return await outbound(*args, **kwargs)
 
     monkeypatch.setattr(call_service, "relay", relay)
-    monkeypatch.setattr(O, "_send", outbound)
+    monkeypatch.setattr(O, "_send", overflow_outbound)
     before = await _balance(clients)
     response = await clients.get(f"/call/{EP}?aweme_id=7")
-    assert response.status_code == (503 if unavailable else 429), response.text
-    assert response.headers["X-Treg-Cost-Micro"] == "0"
+    assert response.status_code == (200 if unavailable else 429), response.text
+    charged = int(response.headers["X-Treg-Cost-Micro"])
     assert attempts == {EP: 1} and used[EP] == 0
-    assert await _balance(clients) == before
-    outbound.assert_not_called()
-    await _assert_released(reserved=True)
-    async with session_maker() as db:
-        assert all(row.cost_micro == 0 for row in (await db.execute(select(OverflowSpend))).scalars())
+    assert before - await _balance(clients) == charged
+    if unavailable:
+        assert charged > 0
+        (overflow_outbound if skip_direct else outbound).assert_awaited_once()
+        async with session_maker() as db:
+            assert (await db.execute(select(Hold))).scalars().all() == []
+    else:
+        assert charged == 0
+        outbound.assert_not_called()
+        overflow_outbound.assert_not_called()
+        await _assert_released(reserved=True)
+        async with session_maker() as db:
+            assert all(row.cost_micro == 0 for row in (await db.execute(select(OverflowSpend))).scalars())
 
 
 @pytest.mark.parametrize("skip_direct", [False, True])
