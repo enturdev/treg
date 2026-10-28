@@ -696,6 +696,12 @@ async def _admit_org_endpoint(request: _ApplicationRequest, endpoint_id: str) ->
     if outcome in {"allowed", "unavailable"}:
         if outcome == "unavailable":
             _warn_quota_unavailable()
+            try:
+                analytics.capture(analytics.SERVER_DISTINCT_ID, "org_endpoint_quota_fail_open", {
+                    "admissions": 1, "target_count": len(targets),
+                })
+            except Exception:  # noqa: BLE001 - observation cannot block a permitted call
+                pass
         request.context.quota_admissions.update(targets)
         return
     request.state.call_cost_micro = 0

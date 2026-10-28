@@ -17,6 +17,8 @@ sources:
   - tests/test_org_endpoint_quota_hub.py
   - tests/test_org_endpoint_quota_async.py
   - tests/test_org_endpoint_quota_best_effort.py
+  - tests/test_org_endpoint_quota_breaker.py
+  - tests/test_org_endpoint_quota_telemetry.py
   - tests/test_org_endpoint_quota_local_rejections.py
   - tests/test_org_endpoint_quota_route.py
   - tests/test_relay_quota_admission.py
@@ -74,9 +76,8 @@ whole route. When no target has a confirmed exhausted rule, Redis uncertainty al
 marks its targets admitted in the logical-call context, so a retry does not try to consume the same
 allowance again. A known quota refusal during
 optional verification is reported as `unchecked`, preserving the successful find and its normal
-charge. `org_endpoint_quota_unavailable` is not a global routed refusal; a legacy child raising it
-follows ordinary candidate-error fallback policy. The normal Redis failure path allows that child
-to run and does not raise that error. Existing deferred holds are released when the primary route refuses.
+charge. Redis uncertainty permits the child to run and does not produce a call error.
+Existing deferred holds are released when the primary route refuses.
 Once an async submission has a task ID, poll errors retain the existing pending response and durable
 worker settlement ownership. Accepted calls are never refunded to the quota after upstream failure,
 cancellation or a lost Redis response.
@@ -90,11 +91,26 @@ Redis database. There is no persistent target registry or deployment allowlist: 
 an exact new target through the management API. The private admin uses its existing full machine
 authentication; ordinary business keys cannot manage allowances.
 
-When enabled, an eligible logical catalog call still makes one Redis round trip even when its
-target has no rule. Parent/child targets are checked together. Admission adds no database commit
-when the request transaction is already closed. Redis I/O is bounded to one second; an outage can
-therefore add that delay before the call proceeds. This keeps calls available while sacrificing
-quota enforcement during failure. Cancellation still propagates through normal hold cleanup.
+When enabled and healthy, an eligible logical catalog call makes one Redis round trip even when
+its target has no rule. Parent/child targets are checked together. Admission adds no database commit
+when the request transaction is already closed. Redis I/O is bounded to one second. A transport
+failure or timeout opens a five-second circuit breaker in that process; calls during the cooldown
+proceed without Redis I/O. Afterward one request probes recovery while concurrent requests still
+proceed without waiting. A failed probe starts another cooldown. Healthy requests remain concurrent.
+Requests already in flight before the first failure, and recovery probes, can still wait one second.
+The breaker stores only availability state, never rules or counters. A valid Lua response indicating
+missing or malformed state does not open it, so one damaged rule cannot bypass another healthy rule.
+Cancellation does not open the breaker and propagates through normal hold cleanup.
+
+Every logical admission allowed without confirmed quota state, including a breaker bypass, emits
+`org_endpoint_quota_fail_open` through the existing non-blocking analytics queue. It uses the server
+identity and event-specific properties `admissions=1` and `target_count`, plus standard telemetry
+build metadata; no Org, endpoint, call ID or request data is sent.
+Count these events or sum `admissions` to observe unconfirmed logical admissions. A parent/child batch
+is one admission; retries and response replays do not emit again. This is best-effort telemetry:
+disabled telemetry, queue pressure or delivery failure can undercount. The warning remains limited
+to once per minute, but does not limit events. No dashboard, alert or production telemetry setting
+is created by this change.
 
 One hash without an application TTL, `treg:org-endpoint-quota:v1`, contains `__schema=1` and fields
 `rule:<org_id>:<endpoint_id>`. Each rule is exactly:
@@ -130,9 +146,10 @@ Rules may be lost during Redis failure, eviction or restoration. Persistence, ba
 eviction reduce that risk, but are not prerequisites for this temporary guard. A Redis acknowledgement
 does not prove a later failover retained the write, and a valid stale snapshot cannot reveal missing
 admissions. There is no reliable ban guarantee while Redis is unavailable or rule data has been lost.
-If only the connection failed and the rules and counts survived, their limits resume automatically
-when Redis is healthy. The outage does not clear or reset them. Calls allowed without a confirmed
-admission are not backfilled after recovery, although an ambiguous write may already have counted one.
+If only the connection failed and the rules and counts survived, their limits resume after a
+successful recovery probe when the cooldown expires. The outage does not clear or reset them.
+Calls allowed without a confirmed admission are not backfilled after recovery, although an ambiguous
+write may already have counted one.
 
 The management API remains strict about its own writes: a Redis outage or uncertain mutation returns
 an error, never a false success or automatic command retry. Reads of a completely absent namespace

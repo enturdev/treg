@@ -192,7 +192,7 @@ async def test_corrupt_or_missing_counter_is_never_reinitialized(store, raw):
 @pytest.mark.parametrize("org,endpoint", [(0, "a.b"), (True, "a.b"),
                                          (42, "*"), (42, "a.*"), (42, "a:b")])
 async def test_invalid_targets_do_not_touch_redis(org, endpoint):
-    store = quota.RedisQuotaStore.__new__(quota.RedisQuotaStore)
+    store = quota.RedisQuotaStore("redis://synthetic.invalid")
     store._client = None
     assert await store.admit(org, endpoint) == "unavailable"
 
@@ -205,7 +205,7 @@ async def test_unknown_transport_outcome_is_reported_without_retry():
         calls += 1
         raise TimeoutError("possibly applied")
 
-    store = quota.RedisQuotaStore.__new__(quota.RedisQuotaStore)
+    store = quota.RedisQuotaStore("redis://synthetic.invalid")
     store._client = SimpleNamespace(eval=uncertain)
     assert await store.admit(42, "example.read") == "unavailable"
     assert calls == 1
@@ -215,7 +215,7 @@ async def test_cancellation_propagates():
     async def cancelled(*args):
         raise asyncio.CancelledError
 
-    store = quota.RedisQuotaStore.__new__(quota.RedisQuotaStore)
+    store = quota.RedisQuotaStore("redis://synthetic.invalid")
     store._client = SimpleNamespace(eval=cancelled)
     with pytest.raises(asyncio.CancelledError):
         await store.admit(42, "example.read")

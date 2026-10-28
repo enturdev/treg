@@ -106,7 +106,7 @@ _DROP_FROM_CHILD = frozenset({b"content-length", b"content-type", b"transfer-enc
 _CALLER_FAULT = frozenset({400, 401, 403, 404, 405, 409, 422})
 _CANDIDATE_LOCAL_FAILURES = frozenset({"tool_access_denied", "policy_denied", "capability_pinned",
                                        "org_endpoint_quota_exceeded"})
-_QUOTA_REFUSALS = frozenset({"org_endpoint_quota_exceeded", "org_endpoint_quota_unavailable"})
+_QUOTA_REFUSALS = frozenset({"org_endpoint_quota_exceeded"})
 _GLOBAL_REFUSALS = frozenset({"insufficient_balance", "tag_spend_cap_reached",
                               "platform_daily_cap_reached", "daily_cap_reached"})
 
@@ -916,8 +916,7 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
 _CHECK_REASONS = {"route_max_cost": "over_cost_limit", "route_no_candidate": "no_checker",
                   **{k: "spend_limit" for k in _GLOBAL_REFUSALS},
                   **{k: "not_allowed" for k in _CANDIDATE_LOCAL_FAILURES},
-                  "org_endpoint_quota_exceeded": "quota_exceeded",
-                  "org_endpoint_quota_unavailable": "quota_unavailable"}
+                  "org_endpoint_quota_exceeded": "quota_exceeded"}
 
 
 def _unchecked(reason: str) -> dict:

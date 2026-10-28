@@ -17,10 +17,13 @@ from test_org_endpoint_quota_redis import put_rule, state, store  # noqa: F401
 
 
 def _use_store(monkeypatch, store):
+    clock = [100.0]
+    monkeypatch.setattr(org_endpoint_quota, "monotonic", lambda: clock[0])
     monkeypatch.setattr(get_settings(), "org_endpoint_quota_enabled", True)
     monkeypatch.setattr(org_endpoint_quota, "_store", store)
     monkeypatch.setattr(call_service, "relay", _fake_relay(200, b'{"answer":"synthetic"}'))
     monkeypatch.setattr(call_service, "_quota_warning_at", None)
+    return clock
 
 
 def test_unavailable_warning_is_sanitized_and_limited_to_once_per_minute(monkeypatch, caplog):
@@ -67,7 +70,10 @@ async def test_lost_or_unknown_rule_allows_without_reinitializing(
 async def test_outage_allows_limited_and_unconfigured_orgs_then_recovers(
     clients, monkeypatch, platform_on, store, caplog,
 ):
-    _use_store(monkeypatch, store)
+    clock = _use_store(monkeypatch, store)
+    events = []
+    monkeypatch.setattr(call_service.analytics, "capture", lambda distinct, event, properties=None, **kw:
+                        events.append(properties) if event == "org_endpoint_quota_fail_open" else None)
     org_id = (await clients.get("/orgs")).json()[0]["org_id"]
     other = await funded_user(clients, "synthetic-quota-unrestricted@example.com")
     await put_rule(store, org=org_id, endpoint=EP, limit=0)
@@ -78,12 +84,16 @@ async def test_outage_allows_limited_and_unconfigured_orgs_then_recovers(
     monkeypatch.setattr(store._client, "eval", unavailable)
     assert (await clients.get(url)).status_code == 200
     assert (await clients.get(url, headers={"X-Treg-Token": other["token"]})).status_code == 200
-    assert unavailable.await_count == 2
+    assert unavailable.await_count == 1
+    assert events == [{"admissions": 1, "target_count": 1}] * 2
     messages = [record.getMessage() for record in caplog.records
                 if record.name == "treg.org_endpoint_quota"]
     assert len(messages) == 1 and "allowing" in messages[0]
     assert "synthetic-secret-url" not in caplog.text
     monkeypatch.setattr(store._client, "eval", original_eval)
+    assert (await clients.get(url)).status_code == 200
+    assert (await state(store, org=org_id, endpoint=EP))["used"] == 0
+    clock[0] += 5
     assert (await clients.get(url)).status_code == 429
     assert (await clients.get(url, headers={"X-Treg-Token": other["token"]})).status_code == 200
     assert (await state(store, org=org_id, endpoint=EP))["used"] == 0
@@ -108,7 +118,7 @@ async def test_uncertain_batch_is_admitted_once_without_extra_commit_or_retry(mo
 async def test_lost_increment_response_allows_once_through_retry_and_replay(
     clients, monkeypatch, platform_on, store,
 ):
-    _use_store(monkeypatch, store)
+    clock = _use_store(monkeypatch, store)
     org_id = (await clients.get("/orgs")).json()[0]["org_id"]
     await put_rule(store, org=org_id, endpoint=EP, limit=1)
     original_eval = store._client.eval
@@ -123,6 +133,7 @@ async def test_lost_increment_response_allows_once_through_retry_and_replay(
     monkeypatch.setattr(call_service, "relay", _relay_script([
         (429, ((b"retry-after", b"0"),), b'{"detail":"slow"}'),
         (200, (), b'{"ok":true}'),
+        (200, (), b'{"ok":true}'),
     ], seen))
     url = f"/call/{EP}?aweme_id=7"
     headers = {"Idempotency-Key": "synthetic-uncertain-quota"}
@@ -132,5 +143,8 @@ async def test_lost_increment_response_allows_once_through_retry_and_replay(
     assert len(seen) == 2 and evaluation.await_count == 1
     assert (await state(store, org=org_id, endpoint=EP))["used"] == 1
     monkeypatch.setattr(store._client, "eval", original_eval)
+    assert (await clients.get(url)).status_code == 200
+    assert (await state(store, org=org_id, endpoint=EP))["used"] == 1
+    clock[0] += 5
     assert (await clients.get(url)).status_code == 429
-    assert len(seen) == 2
+    assert len(seen) == 3

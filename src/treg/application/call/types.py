@@ -36,7 +36,6 @@ _BLAME_BY_KIND: dict[str, Blame] = {
     "policy_denied": "caller",
     "daily_cap_reached": "caller",
     "org_endpoint_quota_exceeded": "caller",
-    "org_endpoint_quota_unavailable": "treg",
     "public_demo_rate_limited": "caller",
     "trial_allowance_unavailable": "treg",
     "trial_allowance_reached": "caller",

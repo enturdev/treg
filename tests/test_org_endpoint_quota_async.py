@@ -139,9 +139,9 @@ async def test_pending_handle_survives_poll_quota_and_worker_settles_once(
 
 
 @pytest.mark.parametrize("kind,status", [
-    ("org_endpoint_quota_exceeded", 429), ("org_endpoint_quota_unavailable", 503),
+    ("connect_failed", 502), ("read_timeout", 504),
 ])
-async def test_bridge_preserves_task_id_when_a_poll_still_raises_quota_failure(kind, status):
+async def test_bridge_preserves_task_id_when_a_poll_raises_transport_failure(kind, status):
     descriptor = dict(arena.catalog_store.load().by_id[VERIFY]["async"], interval=0.05)
     attempts = []
 

@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import re
+from time import monotonic
 from typing import Literal
 
 from ..config import get_settings
 
 KEY = "treg:org-endpoint-quota:v1"
 _TIMEOUT_S = 1.0
+_COOLDOWN_S = 5.0
 _ENDPOINT = re.compile(r"[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)+\Z")
 Outcome = Literal["allowed", "exceeded", "unavailable"]
 Target = tuple[int, str]
@@ -58,12 +60,17 @@ class RedisQuotaStore:
     def __init__(self, url: str) -> None:
         import redis.asyncio as redis
         from redis.backoff import NoBackoff
+        from redis.exceptions import ConnectionError as RedisConnectionError
+        from redis.exceptions import TimeoutError as RedisTimeoutError
         from redis.retry import Retry
 
         self._client = redis.Redis.from_url(
             url, socket_timeout=_TIMEOUT_S, socket_connect_timeout=_TIMEOUT_S,
             decode_responses=True, retry=Retry(NoBackoff(), 0),
         )
+        self._retry_at: float | None = None
+        self._probing = False
+        self._transport_errors = (TimeoutError, OSError, RedisConnectionError, RedisTimeoutError)
 
     async def admit(self, org_id: int, endpoint_id: str) -> Outcome:
         outcome, _ = await self.admit_many(((org_id, endpoint_id),))
@@ -78,21 +85,34 @@ class RedisQuotaStore:
                     or not _ENDPOINT.fullmatch(endpoint_id)):
                 return "unavailable", (org_id, endpoint_id)
         unique = tuple(dict.fromkeys(targets))
+        probe = self._retry_at is not None
+        if probe:
+            if monotonic() < self._retry_at or self._probing:
+                return "unavailable", unique[0]
+            self._probing = True
         try:
             async with asyncio.timeout(_TIMEOUT_S):
                 result = await self._client.eval(
                     _ADMIT, 1, KEY, *(f"rule:{org}:{endpoint}" for org, endpoint in unique))
-            if (isinstance(result, list) and len(result) == 1
-                    and type(result[0]) is int and result[0] == 0):
-                return "allowed", None
-            if (isinstance(result, list) and len(result) == 2
-                    and type(result[0]) is int and result[0] in (1, 2)
-                    and type(result[1]) is int and 1 <= result[1] <= len(unique)):
-                return ("exceeded" if result[0] == 1 else "unavailable",
-                        unique[result[1] - 1])
+        except Exception as exc:  # noqa: BLE001 - never retry a possible increment
+            if isinstance(exc, self._transport_errors):
+                self._retry_at = monotonic() + _COOLDOWN_S
             return "unavailable", unique[0]
-        except Exception:  # noqa: BLE001 - report unknown state without retrying a possible increment
-            return "unavailable", unique[0]
+        else:
+            if probe:
+                self._retry_at = None
+        finally:
+            if probe:
+                self._probing = False
+        if (isinstance(result, list) and len(result) == 1
+                and type(result[0]) is int and result[0] == 0):
+            return "allowed", None
+        if (isinstance(result, list) and len(result) == 2
+                and type(result[0]) is int and result[0] in (1, 2)
+                and type(result[1]) is int and 1 <= result[1] <= len(unique)):
+            return ("exceeded" if result[0] == 1 else "unavailable",
+                    unique[result[1] - 1])
+        return "unavailable", unique[0]
 
     async def aclose(self) -> None:
         await self._client.aclose()

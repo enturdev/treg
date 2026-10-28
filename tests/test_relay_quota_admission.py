@@ -65,12 +65,10 @@ async def test_local_relay_rejection_never_calls_quota_admission(monkeypatch, fa
     outbound.assert_not_called()
 
 
-@pytest.mark.parametrize("kind,status", [
-    ("org_endpoint_quota_exceeded", 429), ("org_endpoint_quota_unavailable", 503),
-])
-async def test_quota_refusal_after_validation_stops_real_transport(monkeypatch, kind, status):
+async def test_quota_refusal_after_validation_stops_real_transport(monkeypatch):
     monkeypatch.setattr(relay_module.get_settings(), "proxy_ssrf_check", False)
-    failure = AuthorizationFailed(kind, status_code=status, detail={"error": kind})
+    failure = AuthorizationFailed("org_endpoint_quota_exceeded", status_code=429,
+                                  detail={"error": "org_endpoint_quota_exceeded"})
     admission = AsyncMock(side_effect=failure)
     outbound = AsyncMock(side_effect=AssertionError("quota refusal cannot send upstream"))
     async with httpx.AsyncClient(transport=httpx.MockTransport(outbound)) as client:
