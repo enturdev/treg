@@ -72,9 +72,16 @@ def render(view: dict[str, Any], help_lines: list[str] | None = None) -> str:
 
 
 def _verbatim(key: str, value: Any) -> str:
+    """Values as typed; keys still follow TOON's quoting (`"person_titles[]"`), or a reader would take
+    the brackets for an array header."""
     if isinstance(value, dict):
-        return "\n".join([f"{key}:"] + [f"  {k}: {v}" for k, v in value.items()])
-    return f"{key}: {value}"
+        return "\n".join([f"{_key(key)}:"] + [f"  {_key(k)}: {v}" for k, v in value.items()])
+    return f"{_key(key)}: {value}"
+
+
+def _key(key: str) -> str:
+    from toon_format import encode
+    return encode({key: 0})[:-len(": 0")]
 
 
 def _help_item(line: str) -> str:
