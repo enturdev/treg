@@ -4451,14 +4451,24 @@ def _home_state(cfg: dict) -> dict:
 
 def _home_answer(home: httpx.Response) -> dict:
     """`/home`'s answer as home state, or what went wrong with it."""
-    if home.status_code == 401:
-        return {"account": None, "account_error": "token rejected"}
+    if home.status_code in (401, 403):
+        return _credential_refused(home)
     if home.status_code >= 500:  # the right registry, having a bad moment
         return {"registry_error": f"HTTP {home.status_code} from /home"}
     body = _json_dict(home)
     if home.status_code != 200 or "account" not in body:  # something answers here, but not a treg registry
         return {"unavailable": f"HTTP {home.status_code} from /home is not a treg answer"}
     return body
+
+
+def _credential_refused(r: httpx.Response) -> dict:
+    """A 401 (the token is not valid) or 403 (valid, but refused: a suspended account or team, a
+    team that needs its SSO), with the registry's reason."""
+    detail = _json_dict(r).get("detail")
+    reason = detail if isinstance(detail, str) and detail else None
+    if r.status_code == 401:
+        return {"account": None, "account_error": "token rejected" + (f": {reason}" if reason else "")}
+    return {"account": None, "account_error": "refused" + (f": {reason}" if reason else "")}
 
 
 def _home_state_by_parts(cfg: dict, c: httpx.Client, state: dict) -> dict:
@@ -4473,9 +4483,8 @@ def _home_state_by_parts(cfg: dict, c: httpx.Client, state: dict) -> dict:
         except httpx.HTTPError as exc:
             state["unavailable"] = f"{type(exc).__name__} reaching the registry"
             return state
-        if me.status_code == 401:
-            state["account"], state["account_error"] = None, "token rejected"
-            return state
+        if me.status_code in (401, 403):
+            return state | _credential_refused(me)
         if me.status_code >= 500:  # the right registry, having a bad moment
             state["registry_error"] = f"HTTP {me.status_code} from /auth/me"
             return state
@@ -4545,8 +4554,7 @@ def cmd_home(args, cfg) -> None:
     problem = state.get("unavailable") or state.get("registry_error")
     _emit({"treg": f"{cli_version()} at {exe}", "about": _home_description(state.get("catalog_tools")),
            "registry": f"{state['registry']} ({problem})" if problem else state["registry"] if custom else None,
-           "account": None if problem else (state.get("account") or "not signed in")
-           + (f" ({state['account_error']})" if state.get("account_error") else ""),
+           "account": None if problem else state.get("account") or state.get("account_error") or "not signed in",
            "team": (team or "none") if state.get("account") else None,
            "balance": _usd(state["balance_micro"]) if "balance_micro" in state else None,
            "own_tools": state.get("own_tools")}, help_lines)
@@ -6020,7 +6028,7 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
         help_lines.append(f"treg catalog get {e['capability']}   # every provider of this job")
     others = [row["id"] for row in view.get("compare") or [] if row["id"] != e["id"]]
     if others:
-        help_lines.append(f"treg catalog get {others[0]}   # the same job from another provider")
+        help_lines.append(f"treg catalog get {others[0]}   # the next way to do this job in compare")
     _emit(view, help_lines)
 
 
@@ -6037,7 +6045,7 @@ def _job_view(job: str, cfg) -> tuple[dict, list[str]] | None:
     id when treg can choose for the caller. None when no job has that id. An id that is both a job and
     an endpoint (a one-provider job) is answered as the endpoint."""
     with _client(cfg, auth=False) as c:
-        r = c.get(f"/catalog/platforms/{quote(job.split('.', 1)[0], safe='')}")
+        r = c.get(f"/catalog/platforms/{quote(job.split('.', 1)[0], safe='')}?include_hidden=1")
         cap = next((x for x in (_json_dict(r).get("capabilities") or []) if x.get("id") == job), None) \
             if r.status_code == 200 else None
         if not cap or not cap.get("endpoints"):
@@ -6047,10 +6055,11 @@ def _job_view(job: str, cfg) -> tuple[dict, list[str]] | None:
     if d.status_code != 200:
         return None
     body = d.json()
-    members = [x for x in [body["endpoint"], *(body.get("siblings") or [])] if x.get("kind") != "routed"]
+    members = [body["endpoint"], *(body.get("siblings") or [])]
     pinned = _pinned_provider(cfg, job)
     ranked = sorted((x for x in members if not pinned or x["provider"] == pinned), key=_compare_rank)
-    view = {"job": job, "does": cap.get("description"), "providers": len(ranked),
+    view = {"job": job, "does": cap.get("description"),
+            "providers": len({x["provider"] for x in ranked if x.get("kind") != "routed"}),
             "routed": f"{routed} {_ROUTED_NOTE}" if routed else None, "pinned": _pinned_note(pinned, job),
             "compare_note": _COMPARE_NOTE, "compare": _compare_rows(ranked)}
     help_lines = [f"treg catalog get {routed}   # the routed plan, in the order a call tries"] if routed else []
@@ -6192,14 +6201,15 @@ def _compare_view(e: dict, body: dict, cfg, limit: int) -> dict:
     then the unmeasured, `limit` rows at most."""
     routing = body.get("routing") or {}
     if routing.get("plan"):
-        price = lambda row: _cost_usd(row["cost"]) if row.get("cost") else _usd_or_none(row.get("usd"))  # noqa: E731
-        plan = [{"id": c["endpoint_id"], "price": price(c),
+        plan = [{"id": c["endpoint_id"], "price": _plan_price(c),
                  "accepts": " | ".join("+".join(v) for v in (c.get("accepts") or [])) or None,
                  "works": _pct(c.get("works")), "hit": _pct(c.get("hit_rate")),
                  "skipped": c.get("skipped") or ("exhausted" if c.get("exhausted") else None)}
                 for c in routing["plan"]]
-        also = [{"id": a["endpoint_id"], "price": price(a)} for a in routing.get("also") or []]
-        return {"routes_note": f"the order a call tries, own keys first at call time; {_METRICS_NOTE}",
+        also = [{"id": a["endpoint_id"], "price": _plan_price(a)} for a in routing.get("also") or []]
+        return {"routes_note": "the order a call tries, own keys first at call time; ~$/call is one call at "
+                               "the default size where it differs from the unit price, what "
+                               f"X-Treg-Route-Max-Cost is checked against, and limit changes it; {_METRICS_NOTE}",
                 "routes": cli_view.table(plan, ("id", "price", "accepts", "works", "hit", "skipped")),
                 "route_headers": routing.get("headers") or None,
                 "also_total": len(also) if len(also) > limit else None,
@@ -6212,6 +6222,19 @@ def _compare_view(e: dict, body: dict, cfg, limit: int) -> dict:
     return {"compare_total": len(others) + 1 if len(others) + 1 > limit else None,
             "compare_note": _COMPARE_NOTE, "compare": _compare_rows([e, *others][:limit]),
             "pinned": _pinned_note(pinned, e.get("capability"))}
+
+
+def _plan_price(row: dict) -> str | None:
+    """The unit price, then what one call at the default size costs when that is another number
+    (a page of rows, a whole credit): the router holds and caps that one."""
+    cost, usd = row.get("cost"), row.get("usd")
+    if not cost:
+        return _usd_or_none(usd)
+    unit = _cost_usd(cost)
+    shown = cost.get("display_usd", cost.get("usd"))
+    if usd is None or shown is None or cost.get("varies") or f"{usd:.3g}" == f"{shown:.3g}":
+        return unit
+    return f"{unit} (~${usd:.3g}/call)"
 
 
 _METRICS_NOTE = ("works is the share of calls the provider answered without error; hit is the share that "
@@ -6236,10 +6259,13 @@ def _pinned_note(pinned: str | None, job: str | None) -> str | None:
 
 
 def _compare_rank(s: dict) -> tuple:
-    """Measured before unmeasured; then the higher success rate, to the percent; then the lower price."""
+    """Measured before unmeasured; then the higher success rate, to the percent; then the lower price
+    (a varying one, as on a routed id, after every known price)."""
     rate = (s.get("observed") or {}).get("ok_rate")
-    usd = (s.get("cost") or {}).get("usd")
-    return (rate is None, -round(rate or 0, 2), usd if isinstance(usd, (int, float)) else float("inf"))
+    cost = s.get("cost") or {}
+    usd = cost.get("usd")
+    known = isinstance(usd, (int, float)) and not cost.get("varies")
+    return (rate is None, -round(rate or 0, 2), usd if known else float("inf"))
 
 
 def _pct(rate) -> str | None:

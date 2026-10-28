@@ -964,7 +964,7 @@ def test_params_say_shared_prose_once_and_lead_with_the_endpoint_rule():
     view = cli._params_view(inp)
     assert list(view)[0] == "params_note"
     assert view["params_shared"] == [{"params": "title, city, company", "note": "Include/exclude string arrays."}]
-    assert all(r["note"] is None for r in view["params"])
+    assert all("note" not in r for r in view["params"])
     assert view["param_examples"]["title"] == '{"include":["title"],"exclude":[]}', "JSON as sent, not repr"
     assert view["param_examples"]["has_email"] == "true" and "example_body" not in view, \
         "per-param examples are not a request: `call` is the runnable one"
@@ -1222,7 +1222,7 @@ def test_catalog_get_needs_an_id_and_404s_helpfully(monkeypatch, capsys):
         cli.cmd_catalog(p.parse_args(["catalog", "get"]), {"base_url": "http://x"})
     capsys.readouterr()
     _stub_catalog_client(monkeypatch, {"/catalog/endpoints/nope.x": _CatalogResp({}, status=404),
-                                       "/catalog/platforms/nope": _CatalogResp({}, status=404)})
+                                       "/catalog/platforms/nope?include_hidden=1": _CatalogResp({}, status=404)})
     with pytest.raises(SystemExit):
         cli.cmd_catalog(p.parse_args(["catalog", "get", "nope.x"]), {"base_url": "http://x"})
     out = _toon(capsys)

@@ -28,7 +28,7 @@ dependencies = [
     "httpx>=0.27",
     "posthog>=7.47.3",
     "questionary>=2.0",
-    "toon-format>=1.2,<1.3",
+    "toon-format==1.2.0",
 ]
 
 [project.optional-dependencies]

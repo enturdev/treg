@@ -17,7 +17,9 @@ VERBATIM_KEYS = frozenset({"call", "param_examples"})
 
 def table(rows: list[dict[str, Any]], fields: tuple[str, ...]) -> list[dict[str, Any]]:
     """Rows with exactly `fields`, in that order, so TOON writes them as one table: the encoder
-    falls back to a list of objects as soon as one row lacks a key."""
+    falls back to a list of objects as soon as one row lacks a key. A field no row has is left out
+    rather than printed as a column of nulls."""
+    fields = tuple(f for f in fields if any(row.get(f) is not None for row in rows))
     return [{f: row.get(f) for f in fields} for row in rows]
 
 
@@ -100,5 +102,5 @@ def _as_typed(text: str, *, list_item: bool = False) -> str:
 
 
 def render_json(view: dict[str, Any], help_lines: list[str] | None = None) -> str:
-    return json.dumps({**{k: v for k, v in view.items() if v is not None},
-                       **({"help": help_lines} if help_lines else {})}, ensure_ascii=False)
+    """JSON keeps a null (`team: null` says there is no team); only the TOON view leaves it out."""
+    return json.dumps({**view, **({"help": help_lines} if help_lines else {})}, ensure_ascii=False)

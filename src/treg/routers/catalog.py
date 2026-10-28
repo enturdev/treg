@@ -231,7 +231,7 @@ def _plan_row(c, cat) -> dict:
     per what the child bills, so a per-success one reads as billing no miss."""
     row = {"endpoint_id": c.endpoint["id"], "accepts": [list(v) for v in c.adapter.accepts],
            "usd": (c.price_micro / 1_000_000) if c.price_micro is not None else None,
-           "cost": catalog_store.sibling_view(c.endpoint, c.endpoint["provider"], cat)["cost"]}
+           "cost": catalog_store.cost_row(c.endpoint, cat)}
     if c.hit_rate is not None:
         row["hit_rate"] = c.hit_rate
         row["usd_per_hit"] = c.expected_cost_per_hit / 1_000_000

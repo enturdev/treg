@@ -63,7 +63,8 @@ usage error that costs it a turn on `--help`. The top-level subparsers are not r
 parser's default `fn` is `cmd_home`, so `--org` and `--json` apply as everywhere else. `_home_state`
 reads it all in one round trip from `GET /home` (`application/home.py`: account, active team, role,
 team count, balance, own tool names, and the catalog's size for the slogan; with no team yet or a
-stale active one it still answers, with `team: null`). Only a registry older than `/home` (a 404)
+one the user has left it still answers, with `team: null`; any other refusal is relayed, and
+`_credential_refused` shows a 401 or 403 with the registry's reason). Only a registry older than `/home` (a 404)
 gets the separate reads, `_home_state_by_parts`: `/auth/me`, `/orgs` and `/tools` go out together and
 the balance follows once the team is known. The team resolves the way `balance`
 and `whoami` do: `/orgs` (`_org_rows`, picked by `_pick_org`: the effective org, else the active
@@ -82,10 +83,11 @@ team at all, or an empty balance (`treg topup`).
 
 Every reader of the CLI is a coding agent. The home view and `catalog` in all its forms build a
 plain dict and print it through `_emit` (`cli_view.render`): the reference TOON encoder
-(`toon-format`, pinned to a minor release because `cli_view` overrides its table decisions). A list
+(`toon-format`, pinned to one release because `cli_view` overrides its private table decisions). A list
 of rows becomes one `name[N]{field,…}:` table only when there are several and they are at most
 `TABLE_MAX_COLUMNS` wide; one row, or a wider one, prints field by field so each value stays beside
-its name (`cli_view.table` gives every row the same keys). Commands and request values (`call`,
+its name (`cli_view.table` gives every row the same keys and leaves out a column that is null in
+every row). Commands and request values (`call`,
 `param_examples`, the `help[N]` list) print as typed, unquoted, so they copy without unescaping; a
 help line holding `: ` is the one that gets quoted. Consecutive one-line fields form a
 paragraph and each table or nested block its own, with a blank line between them. The whole output
@@ -93,7 +95,8 @@ decodes as TOON, which is how the tests read it. Nothing is clipped to fit a col
 print whole; only a list row's `name` is shortened (`_brief`), and `catalog get <id>` has the rest.
 A refusal is data too: `_fail` prints `error`, `message` and a `help` on stdout and exits 1
 (`_fail_response` for a non-2xx answer). `--json` on these commands prints the server's JSON as
-received, a 404 included. A routed row's price is `variable` (`_cost_usd` on `cost.varies`): its
+received, a 404 included; a view the CLI builds itself (home, a refusal) keeps its nulls there,
+which only the TOON view leaves out. A routed row's price is `variable` (`_cost_usd` on `cost.varies`): its
 children's misses are billed, so it is never shown as free. `_client` sends `X-Treg-Client-Version`
 (the CLI release) beside `X-Treg-Client`; `tool_called` records it as `client_version`, so an output
 change can be compared across the releases in use. Like every `x-treg-*` header, it never reaches the
@@ -535,15 +538,17 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   literal (`param_examples`; together they are not a request), any `price_table` and
   `async` descriptor, the `example_response`, then the alternatives: `routes` (the plan, in order) and
   `also` on a routed id (each child priced per its unit from the `cost` the server puts on its plan or
-  `also` row, so `/success` says a miss is free), otherwise `compare` with a one-line `compare_note` (works is answered
+  `also` row, so `/success` says a miss is free, followed by `~$N/call` when one call at the default
+  size costs another amount, the plan row's `usd` that `X-Treg-Route-Max-Cost` is checked against;
+  `_plan_price`), otherwise `compare` with a one-line `compare_note` (works is answered
   without error, hit is found something), the endpoint itself and then the job's other providers,
   measured ones by success rate and price before the unmeasured, `--limit` rows (10 by default) with
   `compare_total` when there are more (`price`, `works` over `calls`, `hit`, `p50`, `last_ok_days` measured from the last real success, `verified` the
   catalog's hand-run stamp). Provider limits, pricing and docs come last. `search`/`get` are matched as
   positional **verbs** inside `cmd_catalog`, not argparse subcommands, so `treg catalog <platform>`
   keeps working and a multi-word query needs no quoting. An id that is no endpoint but a job
-  (`treg catalog get people.search`, `_job_view`) lists every provider of that job, ranked as
-  `compare` ranks them, with its routed id when there is one; an id that is both (a one-provider
+  (`treg catalog get people.search`, `_job_view`) lists every endpoint of that job, hidden kinds
+  included and the routed id ranked like any other, as `compare` ranks them; an id that is both (a one-provider
   job) answers as the endpoint, and the endpoint detail's help points at its job when `compare` was
   cut short. An id that is neither is the `unknown_endpoint`
   error with the server's `did_you_mean` ids and the command for the first one, or a search built from

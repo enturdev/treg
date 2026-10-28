@@ -39,7 +39,9 @@ from ..domain.governance import teams
 from ..domain.governance.teams import _slugify
 from ..domain.identity.access import (
     AGENT_DOMAIN,
+    NOT_A_MEMBER,
     PUBLIC_DEMO_DOMAIN,
+    TEAM_SETUP_PENDING,
     Caller,
     _is_agent_email,
     _is_machine_email,
@@ -482,12 +484,15 @@ async def home(
     db: AsyncSession = Depends(get_session),
 ) -> dict:
     """Bare `treg` in one round trip. A member (an agent key included) answers in full; a signed-in
-    user whose team does not resolve (none yet, or a stale active one) answers with `team: null`
-    instead of a refusal; an invalid or suspended identity is refused as everywhere else."""
+    user whose team does not resolve (none created or chosen yet, or one they have left) answers
+    with `team: null`; every other refusal (an invalid token, a suspended account or team, SSO) is
+    refused as everywhere else, so the CLI can say which."""
     try:
         caller = await require_member(request, x_treg_token, x_treg_org, treg_session, db)
         user = caller.user
-    except HTTPException:
+    except HTTPException as exc:
+        if exc.status_code != 400 and exc.detail not in (NOT_A_MEMBER, TEAM_SETUP_PENDING):
+            raise
         caller, user = None, await require_identity(request, x_treg_token, x_treg_org, treg_session, db)
     count = len(await _visible_orgs(user.id, x_treg_token, x_treg_org, treg_session, db))
     return await home_app.summary(db, user.email, caller, teams=count)

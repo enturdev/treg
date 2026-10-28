@@ -818,10 +818,15 @@ def example_path(endpoint_id: str) -> Path | None:
 _COST_EVIDENCE = frozenset({"note", "source", "source_url", "checked", "confidence"})
 
 
+def cost_row(ep: dict, cat: Catalog) -> dict | None:
+    """An endpoint's price as a comparison row shows it: the cost view without its evidence."""
+    cost = cat.cost_view(ep["cost"], ep["provider"])
+    return {k: v for k, v in cost.items() if k not in _COST_EVIDENCE} if cost else cost
+
+
 def sibling_view(ep: dict, provider_display: str, cat: Catalog) -> dict:
     """One row of an endpoint's comparison with the other providers of its job; the full view is
     that endpoint's own detail."""
-    cost = cat.cost_view(ep["cost"], ep["provider"])
     return {
         "id": ep["id"],
         "provider": ep["provider"],
@@ -829,7 +834,7 @@ def sibling_view(ep: dict, provider_display: str, cat: Catalog) -> dict:
         "name": ep.get("name") or "",
         "scope": ep["scope"],
         "kind": ep.get("kind") or DEFAULT_KIND,
-        "cost": {k: v for k, v in cost.items() if k not in _COST_EVIDENCE} if cost else cost,
+        "cost": cost_row(ep, cat),
         "platform_eligible": cat.platform_eligible(ep),
         "status": ep.get("status") or None,
         "status_note": ep.get("status_note") or None,

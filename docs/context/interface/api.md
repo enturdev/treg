@@ -415,7 +415,9 @@ shared HTTP client. `/auth/logout` remains an HTTP-only cookie action.
   read: account, active team and role, the `/orgs` team count, balance (an auto top-up trigger, as the
   balance route is), own tool names (`access.usable_tools`, the same filter `/tools` applies) and the
   catalog's headline size. A member (an agent key included) answers in full; a signed-in user whose
-  team does not resolve answers with `team: null`; an invalid or suspended identity is refused;
+  team does not resolve (the 400 of no team chosen, `access.NOT_A_MEMBER`, or the bootstrap
+  token's `access.TEAM_SETUP_PENDING`) answers with
+  `team: null`; every other refusal of `require_member` is returned as it is;
   invites via `create_invite` (`POST /orgs/{id}/invites`, admin+) → one-time code (**emailed** via
   `email.send_invite`, best-effort, along with a separate inbox-only `email_token` sign-in link - the
   token is never in the JSON response; see the invite sign-in link below), `accept_invite`

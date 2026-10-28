@@ -235,6 +235,10 @@ async def _user_from_identity_token(token: str, db: AsyncSession) -> User | None
     return user
 
 
+NOT_A_MEMBER = "not a member of this org"
+TEAM_SETUP_PENDING = "finish team setup first — this temporary login token cannot access team resources"
+
+
 async def require_member(
     request: Request,
     x_treg_token: str = Header(default=""),
@@ -281,8 +285,7 @@ async def require_member(
         # scopes shipped, keeping a rolling deploy from revoking existing CLI/MCP installations.
         identity_claims = sess.read_identity_claims(x_treg_token) if x_treg_token else None
         if (identity_claims or {}).get("scope") == sess.BOOTSTRAP_SCOPE:
-            raise HTTPException(status_code=403, detail=(
-                "finish team setup first — this temporary login token cannot access team resources"))
+            raise HTTPException(status_code=403, detail=TEAM_SETUP_PENDING)
         claimed_org = (identity_claims or {}).get("org", "")
         # New Default keys are explicitly team-scoped, so their signed team is authoritative.
         # Older unmarked identity tokens retain the header-first behavior during migration.
@@ -322,7 +325,7 @@ async def require_member(
                     ApiKey.kind == managed_keys.DEFAULT_KIND,
                 ).order_by(ApiKey.id.desc()))).scalars().first()
                 _require_active_key(retained_default)
-            raise HTTPException(status_code=403, detail="not a member of this org")
+            raise HTTPException(status_code=403, detail=NOT_A_MEMBER)
         # Browser sessions are not API keys. A signed identity bearer maps to this membership's
         # default control, except the short-lived typed identity token used only by MCP OAuth.
         claims = identity_claims
