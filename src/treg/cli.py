@@ -4472,7 +4472,7 @@ def _home_help(state: dict) -> list[str]:
     if state.get("unavailable"):
         out.append("treg config   # which registry this CLI talks to")
     elif state.get("registry_error"):
-        out.append("treg   # again in a minute: the registry answered with a server error")
+        out.append("treg   # again in a minute, the registry answered with a server error")
     elif not state.get("account"):
         out.append("treg login   # or treg login --token <key> with a team key")
     elif not state.get("team") and state.get("teams"):
@@ -5993,7 +5993,10 @@ def _access_detail(endpoint_id: str, cfg) -> str | None:
 def _params_view(inp: dict) -> dict:
     """What to SEND, by location, required first: the shortest working call is the required set. A
     nested object (Replicate's `input: {properties: …}`) becomes dotted names, which is what the
-    caller types. The note carries the whole contract: prose, the closed set, default, range, example."""
+    caller types. Each note carries the param's own contract (closed set, default, range); prose that
+    three or more params share is said once, in `params_shared`. The examples are one JSON value per
+    location (`example_body`, `example_query`, `example_path`), as the request carries them. The
+    endpoint's own rule (`params_note`) comes before the table."""
     rows = []
 
     def walk(items: dict, where: str, prefix: str) -> None:
@@ -6003,26 +6006,50 @@ def _params_view(inp: dict) -> dict:
             if isinstance(props, dict) and props:
                 walk(props, where, f"{prefix}{name}.")
                 continue
-            parts = [spec.get("note") or ""]
-            if isinstance(spec.get("enum"), list) and spec["enum"]:
-                parts.append("one of: " + " | ".join(str(v) for v in spec["enum"]))
-            if "default" in spec:
-                parts.append(f"default {spec['default']}")
-            lo, hi = spec.get("min"), spec.get("max")
-            if lo is not None or hi is not None:
-                parts.append(f"range {lo if lo is not None else '…'}-{hi if hi is not None else '…'}")
-            if spec.get("example") not in (None, ""):
-                parts.append(f"e.g. {spec['example']}")
             rows.append({"in": where, "name": f"{prefix}{name}", "type": str(spec.get("type") or "") or None,
-                         "required": bool(spec.get("required")),
-                         "note": " · ".join(p.rstrip(".") if i else p for i, p in enumerate(parts) if p) or None})
+                         "required": bool(spec.get("required")), "_prose": (spec.get("note") or "").strip(),
+                         "_spec": spec})
 
     for where, key in (("path", "pathParams"), ("query", "queryParams"), ("body", "body")):
         if isinstance(inp.get(key), dict):
             walk(inp[key], where, "")
     rows.sort(key=lambda r: not r["required"])
-    return {"params": cli_view.table(rows, ("in", "name", "type", "required", "note")) or None,
-            "params_note": inp.get("note")}
+    examples: dict[str, dict] = {}
+    for r in rows:
+        if r["_spec"].get("example") not in (None, ""):
+            *parents, leaf = r["name"].split(".")
+            node = examples.setdefault(r["in"], {})
+            for part in parents:
+                node = node.setdefault(part, {})
+            node[leaf] = r["_spec"]["example"]
+    counts: dict[str, list[str]] = {}
+    for r in rows:
+        if r["_prose"]:
+            counts.setdefault(r["_prose"], []).append(r["name"])
+    shared = {prose: names for prose, names in counts.items() if len(names) >= 3}
+    for r in rows:
+        spec, parts = r.pop("_spec"), []
+        prose = r.pop("_prose")
+        if prose and prose not in shared:
+            parts.append(prose)
+        if isinstance(spec.get("enum"), list) and spec["enum"]:
+            parts.append("one of: " + " | ".join(_as_sent(v) for v in spec["enum"]))
+        if "default" in spec:
+            parts.append(f"default {_as_sent(spec['default'])}")
+        lo, hi = spec.get("min"), spec.get("max")
+        if lo is not None or hi is not None:
+            parts.append(f"range {lo if lo is not None else '…'}-{hi if hi is not None else '…'}")
+        r["note"] = " · ".join(p.rstrip(".") if i else p for i, p in enumerate(parts) if p) or None
+    return {"params_note": inp.get("note"),
+            "params_shared": [{"params": ", ".join(names), "note": prose} for prose, names in shared.items()] or None,
+            "params": cli_view.table(rows, ("in", "name", "type", "required", "note")) or None,
+            **{f"example_{where}": json.dumps(examples[where], ensure_ascii=False, separators=(",", ":"))
+               for where in ("path", "query", "body") if where in examples}}
+
+
+def _as_sent(value) -> str:
+    """A value as the request carries it: JSON, not Python's repr (`true`, `{"include": [...]}`)."""
+    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
 
 
 def _price_table_view(cost) -> dict:
@@ -6098,7 +6125,8 @@ def _compare_view(e: dict, body: dict, cfg, limit: int) -> dict:
                  "skipped": c.get("skipped") or ("exhausted" if c.get("exhausted") else None)}
                 for c in routing["plan"]]
         also = [{"id": a["endpoint_id"], "price": _usd_or_none(a.get("usd"))} for a in routing.get("also") or []]
-        return {"routes": cli_view.table(plan, ("id", "price", "accepts", "works", "hit", "skipped")),
+        return {"routes_note": f"the order a call tries, own keys first at call time; {_METRICS_NOTE}",
+                "routes": cli_view.table(plan, ("id", "price", "accepts", "works", "hit", "skipped")),
                 "route_headers": routing.get("headers") or None,
                 "also_total": len(also) if len(also) > limit else None,
                 "also": cli_view.table(also[:limit], ("id", "price")) or None}
@@ -6113,9 +6141,14 @@ def _compare_view(e: dict, body: dict, cfg, limit: int) -> dict:
              "last_ok_days": (s.get("observed") or {}).get("last_ok_days"), "verified": s.get("verified")}
             for s in [e, *others][:limit]]
     return {"compare_total": len(others) + 1 if len(others) + 1 > limit else None,
+            "compare_note": _METRICS_NOTE + "; last_ok_days is measured, verified is the catalog's hand-run stamp",
             "compare": cli_view.table(rows, ("id", "price", "works", "calls", "hit", "p50", "last_ok_days", "verified")),
             "pinned": f"your team pins this job to {pinned}; other providers are refused "
                       f"(admin: treg org unpin {e.get('capability')})" if pinned else None}
+
+
+_METRICS_NOTE = ("works is the share of calls the provider answered without error; hit is the share that "
+                 "found something, so a provider can work 100% and still miss; both are measured by treg")
 
 
 def _compare_rank(s: dict) -> tuple:

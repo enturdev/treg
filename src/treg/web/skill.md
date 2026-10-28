@@ -60,7 +60,8 @@ treg catalog request "<what you need>"                   # searched and it is no
 ```
 
 These commands print TOON: `key: value` lines, and tables as `name[N]{field,…}:` with one row per
-line. `help[N]` lists the next commands to run. `treg --json …` prints the server's JSON instead.
+line. Commands (`call`, `help[N]`) and request examples (`example_body`) print exactly as you type
+them. `treg --json …` prints the server's JSON instead.
 
 <!--hub-->
 **Six jobs are already built as tools. Call the tool, not the chain.** Each is one call on

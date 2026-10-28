@@ -76,9 +76,12 @@ signed in, a stale active team (`treg org use`), no team at all, or an empty bal
 
 Every reader of the CLI is a coding agent. The home view and `catalog` in all its forms build a
 plain dict and print it through `_emit` (`cli_view.render`): the reference TOON encoder
-(`toon-format`), where a list of same-shaped rows becomes one `name[N]{field,…}:` table
-(`cli_view.table` gives every row the same keys, or the encoder falls back to a list of objects),
-followed by `help[N]:`, the next commands as a TOON list. Consecutive one-line fields form a
+(`toon-format`, pinned to a minor release because `cli_view` overrides its table decisions). A list
+of rows becomes one `name[N]{field,…}:` table only when there are several and they are at most
+`TABLE_MAX_COLUMNS` wide; one row, or a wider one, prints field by field so each value stays beside
+its name (`cli_view.table` gives every row the same keys). Commands and request examples (`call`,
+`example_body`/`example_query`/`example_path`, the `help[N]` list) print as typed, unquoted, so they
+copy without unescaping; a help line holding `: ` is the one that gets quoted. Consecutive one-line fields form a
 paragraph and each table or nested block its own, with a blank line between them. The whole output
 decodes as TOON, which is how the tests read it. Nothing is clipped to fit a column: ids, prices, parameter names and notes
 print whole; only a list row's `name` is shortened (`_brief`), and `catalog get <id>` has the rest.
@@ -519,9 +522,12 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
 - **`catalog get <endpoint-id>`** (`_catalog_get`) — the last stop before `treg call`
   (`GET /catalog/endpoints/{id}`), in the order an agent acts on it: what it does, `price` in USD with
   `native_price` and the whole `price_note`, `access` (which credential would serve this caller), the
-  paste-ready `call`, `params` by location with required first (`_params_view`), any `price_table` and
+  paste-ready `call`, the endpoint's own rule (`params_note`), prose three or more params share said
+  once (`params_shared`), `params` by location with required first (`_params_view`), the examples as
+  one JSON value per location (`example_body`, values in JSON, not Python's repr), any `price_table` and
   `async` descriptor, the `example_response`, then the alternatives: `routes` (the plan, in order) and
-  `also` on a routed id, otherwise `compare`, the endpoint itself and then the job's other providers,
+  `also` on a routed id, otherwise `compare` with a one-line `compare_note` (works is answered
+  without error, hit is found something), the endpoint itself and then the job's other providers,
   measured ones by success rate and price before the unmeasured, `--limit` rows (10 by default) with
   `compare_total` when there are more (`price`, `works` over `calls`, `hit`, `p50`, `last_ok_days` measured from the last real success, `verified` the
   catalog's hand-run stamp). Provider limits, pricing and docs come last. `search`/`get` are matched as

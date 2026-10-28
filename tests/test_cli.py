@@ -918,7 +918,8 @@ def test_catalog_get_renders_params_siblings_and_the_command(monkeypatch, capsys
     assert out["limits"] == "60 req/min" and out["pricing"] == "https://justoneapi.com/"
     assert [row["id"] for row in out["compare"]] == ["justoneapi.tiktok.video.comments", "tikhub.tiktok.video.comments"]
     assert out["params"][0] == {"in": "query", "name": "awemeId", "type": "string", "required": True,
-                                "note": "the post id · e.g. 76662"}, "required first, the whole contract in the note"
+                                "note": "the post id"}, "required first"
+    assert out["example_query"] == '{"awemeId":"76662"}', "examples as the request carries them"
     assert out["call"] == "treg call justoneapi /api/tiktok/get-post-comment/v1 --query awemeId=76662"
     assert out["example_response"] == body["example_response"]
     keys = list(out)
@@ -940,6 +941,31 @@ def test_catalog_get_compares_a_capped_ranked_few(monkeypatch, capsys):
     out = _toon(capsys)
     assert [r["id"] for r in out["compare"]] == ["p0.job", "p3.job", "p2.job", "p4.job"]
     assert out["compare_total"] == 16 and out["help"][0] == "treg catalog get p0.job --limit 100   # every provider of people.search"
+
+
+def test_a_view_tables_only_several_narrow_rows_and_decodes_to_what_it_was_given():
+    """One row, or rows too wide to read across, print field by field; the data is the same either
+    way, and commands print as typed so they copy without unescaping."""
+    from toon_format import decode
+    from treg import cli_view
+    wide = {f"f{i}": i for i in range(cli_view.TABLE_MAX_COLUMNS + 1)}
+    view = {"one": [{"a": 1, "b": "x, y"}], "narrow": [{"a": 1, "b": 2}, {"a": 3, "b": 4}],
+            "wide": [wide, wide], "keyed": {"US": wide, "UK": wide}, "call": "treg call x --data '{\"k\":[1]}'"}
+    text = cli_view.render(view)
+    assert "narrow[2]{a,b}:" in text and "one[1]:" in text and "wide[2]:" in text and "keyed:" in text
+    assert "call: treg call x --data '{\"k\":[1]}'" in text
+    assert decode(text) == view
+
+
+def test_params_say_shared_prose_once_and_lead_with_the_endpoint_rule():
+    inp = {"note": "At least one filter is required.", "body": {
+        n: {"type": "object", "note": "Include/exclude string arrays.", "example": {"include": [n], "exclude": []}}
+        for n in ("title", "city", "company")} | {"has_email": {"type": "boolean", "example": True}}}
+    view = cli._params_view(inp)
+    assert list(view)[0] == "params_note"
+    assert view["params_shared"] == [{"params": "title, city, company", "note": "Include/exclude string arrays."}]
+    assert all(r["note"] is None for r in view["params"])
+    assert json.loads(view["example_body"])["has_email"] is True
 
 
 def test_a_credit_price_reads_as_dollars_with_the_credits_behind_it():
