@@ -22,6 +22,7 @@ from treg.infra import provider_concurrency
 _SRC = Path(__file__).parents[1] / "src" / "treg"
 
 _DATAPLANE_DERIVED_WRITES = {
+    "org_endpoint_quota": ((service._admit_org_endpoint, "org_endpoint_quota.admit"),),
     # A best-effort external admission lease precedes the balance session.
     "money_admission_lease": (
         (reserve._platform_reserve, "reserve_admission"),
@@ -119,6 +120,7 @@ _DATAPLANE_DERIVED_WRITES = {
     ),
 }
 _EXPECTED_DATAPLANE_WRITES = frozenset({
+    "org_endpoint_quota",
     "money_admission_lease",
     "archive_body_object",
     "auto_topup_task",
@@ -165,6 +167,7 @@ _DERIVED_WRITE_FILES = {
         "store.acquire_slot", "self.store.renew_slot", "self.store.release_slot",
     },
     _SRC / "application" / "call" / "service.py": {
+        "org_endpoint_quota.admit",
         "fair_share.acquire",
         "archive.record",
         "async_task_app.observe_owned_poll",
@@ -180,6 +183,7 @@ _DERIVED_WRITE_FILES = {
     _SRC / "domain" / "money" / "__init__.py": {"reap_stale_holds", "release"},
 }
 _EXPECTED_DERIVED_WRITE_SITES = {
+    ("application/call/service.py", "_admit_org_endpoint", "org_endpoint_quota.admit"),
     ("application/call/reserve.py", "_platform_reserve", "reserve_admission"),
     ("application/call/reserve.py", "reserve_admission", "money_admission.admit"),
     ("application/call/settle.py", "_platform_settle", "money_admission.admit"),

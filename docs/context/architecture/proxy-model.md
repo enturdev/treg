@@ -61,6 +61,11 @@ Streaming retains the root slot through response cleanup. Routing children do no
 additional root slots or rate tokens. Published null disables its limit; legacy environment
 maps have no effect.
 
+The separate [exact org/endpoint allowance](org-endpoint-quota.md) runs inside the shared call
+application after canonical resolution, before holds, cache and overflow. It counts logical
+admissions across credential tiers and fails closed on unknown Redis state. Routed children are
+checked too; allowance failures propagate without supplier fallback or a new charge.
+
 Named catalog calls with authorization metadata select the provider and grant method before
 comparing hosts. This separates Facebook and Instagram tools sharing `graph.facebook.com`;
 the resulting tool enters the same relay without provider-specific relay logic.

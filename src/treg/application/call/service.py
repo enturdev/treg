@@ -24,7 +24,7 @@ from ...domain.catalog import results as catalog_results
 from ...domain.catalog import store as catalog_store
 from ...domain.money import with_margin
 from ...domain import provider_resources
-from ...infra import money_admission
+from ...infra import money_admission, org_endpoint_quota
 from ...infra.db import session_maker
 from ...models import Secret
 from ...sandbox_identity import visitor_name
@@ -662,6 +662,29 @@ async def _relay_live_demo(
         response.headers.get("content-type", "application/json"))
 
 
+async def _admit_org_endpoint(request: _ApplicationRequest, endpoint_id: str) -> None:
+    if not get_settings().org_endpoint_quota_enabled:
+        return
+    target = (request.caller.org_id, endpoint_id)
+    if target in request.context.quota_admissions:
+        return
+    await _await_before_reserve(request.db.commit(), request, request.context.call_ref)
+    outcome = await _await_before_reserve(
+        org_endpoint_quota.admit(*target), request, request.context.call_ref)
+    if outcome == "allowed":
+        request.context.quota_admissions.add(target)
+        return
+    request.state.call_cost_micro = 0
+    exceeded = outcome == "exceeded"
+    kind = "org_endpoint_quota_exceeded" if exceeded else "org_endpoint_quota_unavailable"
+    request.context.refused_by = "policy"
+    raise AuthorizationFailed(kind, status_code=429 if exceeded else 503, detail={
+        "error": kind, "endpoint_id": endpoint_id,
+        "message": "The organization's allowance for this endpoint is exhausted." if exceeded
+        else "Unable to confirm this endpoint's call allowance.",
+    })
+
+
 async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.AsyncClient) -> UpstreamResponse:
     caller = request.caller
     rest = request.raw_rest
@@ -822,6 +845,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
         # each through THIS use case again (child contexts, own hold ids), then assembles one
         # answer. The parent owns the idempotency label and the X-Treg-* stamping below.
         try:
+            await _admit_org_endpoint(request, ep["id"])
             body_bytes = await _await_before_reserve(request.body(), request, call_ref)
             response, charged = await routed.run_routed(
                 request.context, ep, body_bytes, request.headers.get, upstream_client, execute_call,
@@ -833,7 +857,9 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
             request.state.call_audited = True
             charged = (int(exc.detail.get("charged_micro") or 0)
                        if isinstance(exc.detail, dict) else 0)
-            if exc.kind in ("route_caller_fault", "route_failed"):
+            if exc.kind in routed._QUOTA_REFUSALS:
+                request.state.call_cost_micro = 0
+            elif exc.kind in ("route_caller_fault", "route_failed"):
                 request.state.call_cost_micro = charged
             if idem_key and charged > 0 and exc.kind in ("route_caller_fault", "route_failed"):
                 error_body = jsontext.dumps_bytes(
@@ -1095,6 +1121,8 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
     # Stripe test API with the env-held demo key. Any tampered/lookalike tool falls through to
     # synthesize below, so there is never a key to exfiltrate from a sandbox org.
     if demo_sandbox.is_sandbox(caller.org):
+        if mk is not None:
+            await _admit_org_endpoint(request, mk.endpoint_id)
         live_key = get_settings().demo_stripe_key
         if live_key and demo_sandbox.is_live_tool(tool) and request.method in ("GET", "POST"):
             try:
@@ -1173,6 +1201,11 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
 
     if mk is not None:
         mk.deferred = request.context.deferred_settles
+        try:
+            await _admit_org_endpoint(request, mk.endpoint_id)
+        except CallFailure as exc:
+            _audit(exc.status_code, refused_by="policy", charged_micro=0, answered=False)
+            raise
     if mk is not None and mk.tier == "platform" and mk.public_resource_ids:
         # Resolution already proved these ids are absent from every org's durable assignments.
         # End the DB phase before asking the provider whether each is an approved public resource.

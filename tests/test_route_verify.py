@@ -306,6 +306,7 @@ async def test_a_refused_check_says_why_and_costs_nothing(kind, reason):
     parent = type("P", (), {})()
     parent.call_ref = "c1"
     parent.meta = None
+    parent.quota_admissions = set()
     parent.input = type("I", (), {"raw_headers": (), "caller": None, "client_ip": "", "catalog_only": False})()
     v, cost = await call_route._run_check(parent, Check(endpoint=VERIFY, field="email", prefer=("bounceban",)),
                                           {"email": "a@b.c"}, None, [], refuse, None)

@@ -99,7 +99,8 @@ _DROP_FROM_CHILD = frozenset({b"content-length", b"content-type", b"transfer-enc
                               b"x-treg-route-verify", b"host"})
 _CALLER_FAULT = frozenset({400, 401, 403, 404, 405, 409, 422})
 _CANDIDATE_LOCAL_FAILURES = frozenset({"tool_access_denied", "policy_denied", "capability_pinned"})
-_GLOBAL_REFUSALS = frozenset({"insufficient_balance", "tag_spend_cap_reached",
+_QUOTA_REFUSALS = frozenset({"org_endpoint_quota_exceeded", "org_endpoint_quota_unavailable"})
+_GLOBAL_REFUSALS = _QUOTA_REFUSALS | frozenset({"insufficient_balance", "tag_spend_cap_reached",
                               "platform_daily_cap_reached", "daily_cap_reached"})
 
 
@@ -538,7 +539,8 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
         ignored = cand.ignored
         remaining = max(0, options.max_cost_micro - spent) if options.max_cost_micro is not None else None
         child = CallContext(input=_child_input(parent, cand.endpoint, query, body, remaining), call_ref=f"{parent.call_ref}:r{n}",
-                            meta=parent.meta, deferred_settles=pending)
+                            meta=parent.meta, deferred_settles=pending,
+                            quota_admissions=parent.quota_admissions)
         try:
             response = await execute_child(child, upstream_client)
         except CallFailure as exc:
@@ -585,7 +587,8 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
                 poll_query = {name: task_id}
                 poll_child = CallContext(
                     input=_child_input(parent, poll_ep, poll_query, {}, remaining),
-                    call_ref=f"{child.call_ref}:p{poll_number}", meta=parent.meta)
+                    call_ref=f"{child.call_ref}:p{poll_number}", meta=parent.meta,
+                    quota_admissions=parent.quota_admissions)
                 poll_response = await execute_child(poll_child, upstream_client)
                 return poll_response, await _read(poll_response)
 
@@ -899,11 +902,14 @@ async def _run_check(parent: CallContext, check, output: dict, remaining: int | 
     prefer = ((PREFER_HEADER.encode(), ",".join(check.prefer).encode()),) if routed and check.prefer else ()
     child = CallContext(input=_child_input(parent, ep, query, body, remaining, prefer),
                         call_ref=f"{parent.call_ref}:v", meta=parent.meta,
-                        deferred_settles=None if routed else pending)
+                        deferred_settles=None if routed else pending,
+                        quota_admissions=parent.quota_admissions)
     try:
         response = await execute_child(child, upstream_client)
         raw = await _read(response)
     except CallFailure as exc:
+        if exc.kind in _QUOTA_REFUSALS:
+            raise
         return _unchecked(_CHECK_REASONS.get(exc.kind, "checker_failed")), 0
     except Exception:
         log.warning("check %s failed after %s", check.endpoint, parent.call_ref, exc_info=True)

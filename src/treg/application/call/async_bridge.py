@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from ...domain import asynctasks
-from .types import UpstreamResponse
+from .types import CallFailure, UpstreamResponse
 
 
 @dataclass(frozen=True)
@@ -68,6 +68,11 @@ async def await_terminal(
             response, raw = await poll(extracted.task_id, attempt)
         except asyncio.CancelledError:
             raise
+        except CallFailure as exc:
+            if exc.kind in {"org_endpoint_quota_exceeded", "org_endpoint_quota_unavailable"}:
+                raise
+            last_detail = str(exc)[:160]
+            continue
         except Exception as exc:  # noqa: BLE001 - the durable worker remains the settlement backstop
             last_detail = str(exc)[:160]
             continue

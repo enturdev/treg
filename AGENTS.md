@@ -34,6 +34,8 @@ from the repository that owns the task; the sibling path supplies the other half
 Everything else in this file is guidance; these are the contract, and they win over any other passage.
 
 1. A team's own key always wins over treg's, is never metered, and is never routed or overflowed.
+   An operator's exact org/endpoint protective call allowance applies to every credential tier;
+   it counts admitted logical calls, not money or provider credits.
 2. A hold (the balance `reserve` sets aside for one call) is settled or released exactly once, on
    every path: timeout, cancellation and exceptions included.
 3. A request holds zero database connections while upstream or object-storage I/O is in flight.
@@ -142,7 +144,8 @@ agents then built against a constitution that was wrong.
   credentials, catalog prices and balances, and writes only what `tests/test_call_architecture.py`
   allowlists (the ledger entries, idempotency claims, OAuth refresh, audit and telemetry, first-call
   markers, tag budgets, capacity marks, overflow spend, the member's daily-cap slot, the per-team
-  archive-question marks, and durable provider-resource ownership). Extend the
+  archive-question marks, durable provider-resource ownership, and persistent org/endpoint
+  quota admission counters). Extend the
   test's allowlist in the same PR as any new write, and expect the reviewer to ask why.
 - **The tool hub** (`application/hub/`, behind `TREG_HUB_ENABLED`) runs a maker's recipe as ordinary
   calls: every step goes through `execute_call` under its own hold, a catalog step as the caller and
