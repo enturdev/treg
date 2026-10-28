@@ -17,12 +17,27 @@
 
 adapters:
   # ---- people.email.find --------------------------------------------------------------------
+  orbisearch.people.email.find:
+    accepts: [[first_name, last_name, domain], [linkedin_url]]
+    in: {first_name: body.first_name, last_name: body.last_name,
+         domain: body.domain, linkedin_url: body.linkedin_url}
+    const: {body.timeout: 30}
+    out: {email: email, first_name: first_name, last_name: last_name,
+          verified: "status == 'safe'", confidence: "confidence / 100"}
+    miss: "email == null"
   anymailfinder.people.email.find:
     accepts: [[full_name, domain], [first_name, last_name, domain], [linkedin_url]]
     in: {full_name: body.full_name, first_name: body.first_name, last_name: body.last_name,
          domain: body.domain, linkedin_url: body.linkedin_url}
     out: {email: valid_email, verified: "email_status == 'valid'"}
     miss: "valid_email == null"
+  enrow.people.email.find:
+    accepts: [[full_name, domain], [first_name, last_name, domain], [linkedin_url]]
+    in: {full_name: body.fullname, domain: body.company_domain, linkedin_url: body.linkedin_url}
+    in_expr: {body.fullname: "join(first_name, last_name)"}
+    out: {email: email, first_name: info.firstname, last_name: info.lastname,
+          verified: "qualification == 'valid'"}
+    miss: "email == null"
   contactout.people.contact.work:
     accepts: [[linkedin_url]]
     in: {linkedin_url: queryParams.profile}
@@ -370,6 +385,12 @@ adapters:
     miss: "data.creator_info.unique_id == null"
 
   # ---- people.phone.find --------------------------------------------------------------------
+  enrow.people.phone.find:
+    accepts: [[linkedin_url], [first_name, last_name, domain]]
+    in: {linkedin_url: body.linkedin_url, first_name: body.firstname,
+         last_name: body.lastname, domain: body.company_domain}
+    out: {phone: number, country_code: country}
+    miss: "number == null"
   contactout.people.contact.phone:
     accepts: [[linkedin_url]]
     in: {linkedin_url: queryParams.profile}
@@ -482,6 +503,19 @@ adapters:
                no_coverage: unknown, inconclusive: unknown, not_applicable: unknown}
 
   # ---- people.email.verify ------------------------------------------------------------------
+  orbisearch.people.email.verify:
+    accepts: [[email]]
+    in: {email: queryParams.email}
+    const: {queryParams.timeout: 20}
+    out: {valid: "status == 'safe'", status: status, score: confidence}
+    miss: "status == null"
+    verdict: "choose(is_domain_catch_all == true, choose(status == 'risky', 'catch_all', status), status)"
+    verdicts: {safe: valid}
+  enrow.people.email.verify:
+    accepts: [[email]]
+    in: {email: body.email}
+    out: {valid: "qualification == 'valid'", status: qualification}
+    miss: "qualification == null"
   anymailfinder.people.email.verify:
     accepts: [[email]]
     in: {email: body.email}
@@ -995,6 +1029,13 @@ adapters:
           location: "results[0].location.raw"}
     miss: "results[0].error != null"
   # ---- companies.enrich (batch 5, 2026-08-28) --------------------------------------------------
+  orbisearch.companies.enrich:
+    accepts: [[domain], [linkedin_url]]
+    in: {domain: queryParams.domain, linkedin_url: queryParams.linkedin_url}
+    out: {name: name, domain: domain, website: website, description: description,
+          industry: industry, employees: company_size.label, founded: founded_year,
+          location: "join(headquarters.city, headquarters.country)", linkedin_url: linkedin_url}
+    miss: "result == 'not_found'"
   crustdata.companies.identify:
     # Identity resolution, not enrichment: evidence only, not a routed companies.enrich child.
     route: false

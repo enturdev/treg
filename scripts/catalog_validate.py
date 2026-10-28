@@ -1025,10 +1025,10 @@ def check_cost(cost: dict, where: str, errors: list[str], warnings: list[str],
         if settle == "terminal_presence":
             if (cost.get("type") != "per_success" or "reported_charge" in cost
                     or not isinstance(presence, dict)
-                    or not {"row", "field"} <= set(presence) <= {"row", "field", "request_field"}
+                    or not {"field"} <= set(presence) <= {"row", "field", "request_field"}
                     or any(not isinstance(presence.get(key), str)
                            or not JSON_PATH.fullmatch(presence[key]) for key in presence)):
-                fail(errors, where, "cost.settle terminal_presence requires a per_success price and presence.row/field JSON paths")
+                fail(errors, where, "cost.settle terminal_presence requires a per_success price and presence.field JSON path (optional row)")
         elif presence is not None:
             fail(errors, where, "cost.presence requires settle: terminal_presence")
         if settle == "quantity" or "quantity" in cost:
@@ -1463,8 +1463,11 @@ def main(argv: list[str]) -> int:
                     bounded = any(isinstance(spec, dict) and str(spec.get("type", "")).startswith("array")
                                   and spec.get("required") and spec.get("minItems") == 1
                                   and spec.get("maxItems") == 1 for spec in body_fields.values())
-                    if not ep.get("body_allowlist") or not bounded:
-                        fail(errors, where, "terminal_presence requires body_allowlist and a required one-item array")
+                    root_result = "row" not in cost["presence"]
+                    scalar_body = not any(isinstance(spec, dict) and str(spec.get("type", "")).startswith("array")
+                                          for spec in body_fields.values())
+                    if not ep.get("body_allowlist") or (not bounded and not (root_result and scalar_body)):
+                        fail(errors, where, "terminal_presence requires body_allowlist and a singular request body")
                 terminal_ex = ep.get("terminal_example_response")
                 if terminal_ex is not None and not (CATALOG / str(terminal_ex)).is_file():
                     fail(errors, where, f"terminal_example_response '{terminal_ex}' does not exist")

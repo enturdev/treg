@@ -1765,6 +1765,26 @@ CONTACTOUT = OAuthProvider(
     # Garbage token returns HTTP 401; the supplied platform token returns 200.
 )
 
+ORBISEARCH = OAuthProvider(
+    service="orbisearch",
+    display_name="OrbiSearch",
+    auth_kind="key",
+    token_label="API key",
+    token_placeholder="your OrbiSearch API key",
+    token_header="X-API-Key",
+    token_format="{secret}",
+    setup_url="https://orbisearch.com/dashboard/api-keys",
+    setup_action_label="Get your OrbiSearch API key",
+    setup_steps=("Sign in to OrbiSearch and copy an API key from the dashboard.",),
+    setup_note="A free credit-balance check verifies the key. Your own key is billed by OrbiSearch.",
+    auth_uri="", token_uri="", scopes={}, client_id_setting="", client_secret_setting="",
+    category="Enrichment",
+    summary="Verify email addresses, find work emails, and enrich companies.",
+    base_url="https://api.orbisearch.com",
+    docs_url="https://orbisearch.com/docs",
+    probe_path="/v1/credits",
+)
+
 MILLIONVERIFIER = OAuthProvider(
     service="millionverifier",
     display_name="MillionVerifier",
@@ -3427,6 +3447,22 @@ ANYMAILFINDER = OAuthProvider(
     probe_path="/v5.1/account", token_verify_field="email",
 )
 
+ENROW = OAuthProvider(
+    service="enrow", display_name="Enrow", auth_kind="key",
+    token_label="API key", token_placeholder="your Enrow API key",
+    token_header="x-api-key", token_format="{secret}",
+    setup_url="https://app.enrow.io/",
+    setup_action_label="Get your Enrow API key",
+    setup_steps=("Sign in to Enrow and open API Settings.", "Copy your API key."),
+    setup_note="Email and phone searches use credits; the account check is free.",
+    auth_uri="", token_uri="", scopes={}, client_id_setting="", client_secret_setting="",
+    category="Enrichment",
+    summary="Find and verify professional emails and find phone numbers.",
+    base_url="https://api.enrow.io",
+    docs_url="https://docs.enrow.io/api-overview",
+    probe_path="/account/info",
+)
+
 
 DROPCONTACT = OAuthProvider(
     service="dropcontact", display_name="Dropcontact", auth_kind="key",
@@ -4115,7 +4151,7 @@ REGISTRY: dict[str, OAuthProvider] = {
         # API-key providers
         ANYAPI, APOLLO, PDL, AKTA, HUNTER, MOBIUSENGINE_JOBS, SUMBLE, MOLTSETS, OPENMART, HARVESTAPI, FETCHINIO, SIXTYFOUR, BLITZAPI, DROPLEADS,
         QUICKENRICH, PROSPEO, AIARK, WIZA, LIMADATA, GETLEADSIO, SCRUBBY, ZEROBOUNCE, DATAGMA,
-        TRYKITT, CONTACTOUT, MILLIONVERIFIER, BOUNCEBAN, CRUNCHBASE, MINIMAX, FISHAUDIO,
+        TRYKITT, CONTACTOUT, MILLIONVERIFIER, ORBISEARCH, BOUNCEBAN, CRUNCHBASE, MINIMAX, FISHAUDIO,
         OPENROUTER,
         REPLICATE,
         REAPI, PIAPI, GOOGLE_AI, TINYFISH,

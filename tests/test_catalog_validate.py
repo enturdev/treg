@@ -99,7 +99,12 @@ def test_terminal_presence_cost_requires_a_bounded_async_result_rule():
     invalid: list[str] = []
     validator.check_cost(base | {"presence": {"row": "data..0", "field": "email"}},
                          "catalog:test", invalid, [])
-    assert any("presence.row/field JSON paths" in error for error in invalid)
+    assert any("presence.field JSON path" in error for error in invalid)
+
+    root_errors: list[str] = []
+    validator.check_cost(base | {"presence": {"field": "number"}},
+                         "catalog:test", root_errors, [])
+    assert root_errors == []
 
 
 def test_status_marker_references_must_exist_and_end_at_a_live_endpoint():

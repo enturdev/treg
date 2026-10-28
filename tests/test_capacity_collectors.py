@@ -401,6 +401,27 @@ async def test_fetchin_capacity_uses_free_subscription_balance():
     assert "account limit 5 requests/s" in row["note"]
 
 
+async def test_orbisearch_capacity_uses_free_credits_route():
+    def probe(request):
+        assert request.method == "GET"
+        assert request.url == "https://api.orbisearch.com/v1/credits"
+        assert request.headers["x-api-key"] == "test-key"
+        return httpx.Response(200, json={"credits": 1250.5, "user_id": "user_example"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(probe)) as client:
+        row = await collectors._orbisearch(client, "test-key")
+    assert row == {"value": 1250.5, "unit": "credits", "note": "prepaid credit balance"}
+
+
+@pytest.mark.parametrize("balance", [None, True, -1, "12"])
+async def test_orbisearch_capacity_rejects_invalid_balance(balance):
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda _request: httpx.Response(200, json={"credits": balance})
+    )) as client:
+        with pytest.raises(ValueError, match="valid credit balance"):
+            await collectors._orbisearch(client, "test-key")
+
+
 @pytest.mark.parametrize("remaining", [None, True, -1, "51000", float("nan")])
 async def test_fetchin_capacity_rejects_uncertain_balances(remaining):
     def probe(_request):
@@ -1027,14 +1048,17 @@ async def test_getleadsio_rejects_payload_without_a_meter(payload):
     (collectors._reapi, {"balance": 12500}, 12500, "credits"),
     (collectors._piapi, {"data": {"account_id": "a", "equivalent_in_usd": 3.2}}, 3.2, "USD"),
     (collectors._piapi, {"equivalent_in_usd": 0}, 0, "USD"),
+    (collectors._enrow, {"credits": 10007.5, "credits_breakdown": {}}, 10007.5, "credits"),
 ])
 async def test_documented_balance_collectors(collector, payload, value, unit):
     row = await _serve_json(collector, payload)
     assert (row["value"], row["unit"]) == (value, unit)
 
 
-@pytest.mark.parametrize("collector", [collectors._anyapi, collectors._reapi, collectors._piapi])
-@pytest.mark.parametrize("payload", [{}, {"usd": -1, "balance": -1, "equivalent_in_usd": -1}])
+@pytest.mark.parametrize("collector", [collectors._anyapi, collectors._reapi, collectors._piapi,
+                                        collectors._enrow])
+@pytest.mark.parametrize("payload", [{}, {"usd": -1, "balance": -1, "equivalent_in_usd": -1,
+                                        "credits": -1}])
 async def test_documented_balance_collectors_reject_missing_or_negative(collector, payload):
     with pytest.raises(ValueError):
         await _serve_json(collector, payload)

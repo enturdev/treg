@@ -135,6 +135,8 @@ CATALOG: list[dict] = [
     {"provider": "ScrapeCreators", "tokens": ["SCRAPECREATORS"],   "base_url": "https://api.scrapecreators.com",                  "auth": {"shape": "api_key_header", "header": "x-api-key"}},
     {"provider": "Fetchin", "tokens": ["FETCHINIO"], "base_url": "https://api.fetchin.io",
      "auth": {"shape": "api_key_header", "header": "X-API-Key"}, "probe": "api/v1/subscription"},
+    {"provider": "OrbiSearch", "tokens": ["ORBISEARCH"], "base_url": "https://api.orbisearch.com",
+     "auth": {"shape": "api_key_header", "header": "X-API-Key"}, "probe": "v1/credits"},
     {"provider": "Sumble", "tokens": ["SUMBLE"], "base_url": "https://api.sumble.com/v9",
      "auth": {"shape": "bearer"}},
     {"provider": "MoltSets", "tokens": ["MOLTSETS"],

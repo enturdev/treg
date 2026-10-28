@@ -244,7 +244,8 @@ def settle(basis: dict, evidence: dict[str, Any]) -> int:
     if kind == "terminal_presence":
         if amount.get("request_billed"):
             return max(0, int(basis.get("reserve_micro") or 0))
-        row = _path(evidence.get("terminal"), amount["row"])
+        terminal = evidence.get("terminal")
+        row = _path(terminal, amount["row"]) if amount.get("row") else terminal
         if isinstance(row, dict):
             found = _path(row, amount["field"])
             if found is None or found == "" or found == []:

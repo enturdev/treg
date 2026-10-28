@@ -1008,6 +1008,21 @@ def test_anymailfinder_platform_prices_all_shared_key_tools():
         "anymailfinder.people.email.verify",
         "anymailfinder.companies.emails.count",
     }
+
+
+def test_orbisearch_shared_key_scope_and_verified_credit_prices():
+    from treg.domain.catalog import store as cs
+
+    c = cs.load()
+    assert c.credit_rates["orbisearch"] == 0.0062
+    for suffix, usd in (("people.email.verify", 0.00124),
+                        ("people.email.find", 0.0062),
+                        ("companies.enrich", 0.0062)):
+        ep = c.by_id[f"orbisearch.{suffix}"]
+        assert c.platform_eligible(ep), suffix
+        assert c.cost_view(ep["cost"], "orbisearch")["usd"] == usd
+    assert not c.platform_eligible(c.by_id["orbisearch.account.usage"])
+    assert not c.platform_eligible(c.by_id["orbisearch.people.email.content.spam_check"])
     assert c.cost_view(c.by_id["anymailfinder.people.email.verify"]["cost"], "anymailfinder")["usd"] == 0.004
 
 
