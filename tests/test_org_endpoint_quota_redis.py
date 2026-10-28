@@ -89,6 +89,45 @@ async def test_zero_quota_and_exact_pairs_and_disabled_tombstone(store):
     assert (await state(store))["used"] == 5
 
 
+async def test_parent_and_child_admission_is_all_or_nothing(store):
+    parent = (42, "example.route")
+    child = (42, "example.read")
+    await put_rule(store, endpoint=parent[1], limit=5)
+    await put_rule(store, limit=0)
+    assert await store.admit_many((parent, child)) == ("exceeded", child)
+    assert (await state(store, endpoint=parent[1]))["used"] == 0
+    assert (await state(store))["used"] == 0
+    await put_rule(store, endpoint=parent[1], limit=0)
+    await put_rule(store, limit=5)
+    assert await store.admit_many((parent, child)) == ("exceeded", parent)
+    assert (await state(store))["used"] == 0
+    await put_rule(store, endpoint=parent[1], limit=5)
+    assert await store.admit_many((parent, child, child)) == ("allowed", None)
+    assert (await state(store, endpoint=parent[1]))["used"] == 1
+    assert (await state(store))["used"] == 1
+    await store._client.hset(quota.KEY, "rule:42:example.read", '{"used":null}')
+    assert await store.admit_many((parent, child)) == ("unavailable", child)
+    assert (await state(store, endpoint=parent[1]))["used"] == 1
+
+
+async def test_concurrent_parent_child_batches_never_partially_consume(store):
+    other = quota.RedisQuotaStore(
+        "unix://" + store._client.connection_pool.connection_kwargs["path"])
+    targets = ((42, "example.route"), (42, "example.read"))
+    await put_rule(store, endpoint="example.route", limit=17)
+    await put_rule(store, limit=40)
+    try:
+        results = await asyncio.gather(*[
+            (store if i % 2 else other).admit_many(targets) for i in range(80)
+        ])
+        assert results.count(("allowed", None)) == 17
+        assert results.count(("exceeded", targets[0])) == 63
+        assert (await state(store, endpoint="example.route"))["used"] == 17
+        assert (await state(store))["used"] == 17
+    finally:
+        await other.aclose()
+
+
 async def test_missing_namespace_schema_and_expiry_never_mean_no_rules(store):
     await store._client.delete(quota.KEY)
     assert await store.admit(42, "example.read") == "unavailable"

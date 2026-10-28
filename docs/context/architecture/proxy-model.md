@@ -62,9 +62,10 @@ additional root slots or rate tokens. Published null disables its limit; legacy 
 maps have no effect.
 
 The separate [exact org/endpoint allowance](org-endpoint-quota.md) runs inside the shared call
-application after canonical resolution, before holds, cache and overflow. It counts logical
-admissions across credential tiers and fails closed on unknown Redis state. Routed children are
-checked too; allowance failures propagate without supplier fallback or a new charge.
+application after canonical resolution and local/money admission, immediately before returning
+a cache hit or sending a direct/overflow request. It counts logical admissions across credential
+tiers and releases unused holds on refusal. An exhausted child may be skipped for another routed
+candidate; unknown state stops that waterfall. Optional verification preserves the find result.
 
 Named catalog calls with authorization metadata select the provider and grant method before
 comparing hosts. This separates Facebook and Instagram tools sharing `graph.facebook.com`;

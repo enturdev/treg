@@ -26,6 +26,7 @@ from test_capacity_overflow import overflow_on  # noqa: F401
 from test_hub import _steps_manifest, hub_on  # noqa: F401
 from test_influencersclub_overflow import SEARCH, _body, _sync, influencers_on  # noqa: F401
 from test_marketplace_call import EP, _balance, _fake_relay, platform_on  # noqa: F401
+from test_org_endpoint_quota_call import _reject_before_send
 from test_route_verify import ASK, FIND
 
 
@@ -40,6 +41,15 @@ def _block(monkeypatch, org_id, *, unavailable=False):
         return "allowed"
 
     monkeypatch.setattr(org_endpoint_quota, "admit", admit)
+
+    async def admit_many(targets):
+        for target in dict.fromkeys(targets):
+            outcome = await admit(*target)
+            if outcome != "allowed":
+                return outcome, target
+        return "allowed", None
+
+    monkeypatch.setattr(org_endpoint_quota, "admit_many", admit_many)
     return attempts
 
 
@@ -66,7 +76,7 @@ async def test_discovery_quota_precedes_direct_and_orthogonal(
         capacity_view.invalidate()
     org_id = (await clients.get("/orgs")).json()[0]["org_id"]
     attempts = _block(monkeypatch, org_id)
-    direct = AsyncMock(side_effect=AssertionError("blocked endpoint reached direct upstream"))
+    direct = AsyncMock(side_effect=_reject_before_send)
     overflow = AsyncMock(side_effect=AssertionError("blocked endpoint reached Orthogonal"))
     monkeypatch.setattr(call_service, "relay", direct)
     monkeypatch.setattr(O, "_send", overflow)
@@ -77,22 +87,34 @@ async def test_discovery_quota_precedes_direct_and_orthogonal(
     assert response.headers["X-Treg-Cost-Micro"] == "0"
     assert attempts == {SEARCH: 1}
     assert await _balance(clients) == before
-    direct.assert_not_called()
+    if skip_direct:
+        direct.assert_not_called()
+    else:
+        direct.assert_awaited_once()
     overflow.assert_not_called()
     holds, entries = await _money()
     assert not holds
-    assert not [entry for entry in entries if entry.kind in {"reserve", "settle"}]
+    assert not [entry for entry in entries if entry.kind == "settle"]
+    assert sum(entry.amount_micro for entry in entries
+               if entry.kind in {"reserve", "release"}) == 0
 
 
-@pytest.mark.parametrize("unavailable,status", [(False, 429), (True, 503)])
-async def test_discovery_in_a_synthetic_route_plan_stops_before_later_candidates(
-    clients, monkeypatch, influencers_on, unavailable, status,
+@pytest.mark.parametrize("unavailable", [False, True])
+async def test_discovery_in_a_synthetic_route_plan_has_endpoint_local_quota(
+    clients, monkeypatch, influencers_on, unavailable,
 ):
     """Discovery currently has no waterfall; inject only a plan to test the shared child road."""
+    monkeypatch.setenv("TREG_PLATFORM_PROVIDERS", "influencersclub,tikhub")
+    get_settings.cache_clear()
     catalog = catalog_store.load()
     candidates = [Candidate(
         endpoint=catalog.by_id[endpoint_id],
-        adapter=SimpleNamespace(to_upstream=lambda identity, variant: ({}, _body())),
+        adapter=SimpleNamespace(
+            to_upstream=lambda identity, variant, endpoint=endpoint_id: (
+                ({"aweme_id": "7"}, None) if endpoint == EP else ({}, _body())),
+            from_upstream=lambda doc: {"email": "synthetic@example.com", "verified": True},
+            is_miss=lambda doc: False,
+        ),
         variant=(), tier="platform", price_micro=1000, hit_rate=None,
         ok_rate=None, p50_ms=None, last_ok_days=None,
     ) for endpoint_id in (SEARCH, EP)]
@@ -101,20 +123,39 @@ async def test_discovery_in_a_synthetic_route_plan_stops_before_later_candidates
     )))
     org_id = (await clients.get("/orgs")).json()[0]["org_id"]
     attempts = _block(monkeypatch, org_id, unavailable=unavailable)
-    relay = AsyncMock(side_effect=AssertionError("quota refusal must stop the route"))
+    sent = []
+
+    async def send(request, upstream_url, *args, **kwargs):
+        if before_outbound := kwargs.pop("before_outbound", None):
+            await before_outbound()
+        sent.append(upstream_url)
+        return await _fake_relay(200, b'{"data":"synthetic"}')(
+            request, upstream_url, *args, **kwargs)
+
+    relay = AsyncMock(side_effect=send)
     monkeypatch.setattr(call_service, "relay", relay)
     before = await _balance(clients)
     response = await clients.post(f"/call/{FIND}", json=ASK)
-    assert response.status_code == status, response.text
-    assert response.json()["detail"]["error"] == (
-        "org_endpoint_quota_unavailable" if unavailable else "org_endpoint_quota_exceeded")
-    assert response.headers["X-Treg-Cost-Micro"] == "0"
-    assert attempts == {FIND: 1, SEARCH: 1}
-    assert await _balance(clients) == before
-    relay.assert_not_called()
+    assert response.status_code == (503 if unavailable else 200), response.text
+    if unavailable:
+        assert response.json()["detail"]["error"] == "org_endpoint_quota_unavailable"
+        assert response.headers["X-Treg-Cost-Micro"] == "0"
+        assert attempts == {FIND: 1, SEARCH: 1}
+        assert await _balance(clients) == before
+        assert sent == []
+    else:
+        result = response.json()
+        assert result["output"]["email"] == "synthetic@example.com"
+        assert result["_treg"]["served_by"] == EP
+        assert result["_treg"]["tried"][0]["outcome"] == "skipped"
+        assert result["_treg"]["tried"][0]["charged_micro"] == 0
+        assert attempts == {FIND: 2, SEARCH: 1, EP: 1}
+        assert before - await _balance(clients) == 1000
+        assert len(sent) == 1 and "influencers.club" not in sent[0]
     holds, entries = await _money()
     assert not holds
-    assert not [entry for entry in entries if entry.kind in {"reserve", "settle"}]
+    settled = {entry.call_id for entry in entries if entry.kind == "settle"}
+    assert settled == (set() if unavailable else {response.headers["X-Treg-Call-Id"] + ":r1"})
 
 
 @pytest.mark.parametrize("allow_fail", [False, True])
@@ -139,6 +180,8 @@ async def test_hub_quota_refusal_has_zero_child_cost_but_preserves_other_step_bi
     blocked = False
 
     async def relay(request, upstream_url, *args, **kwargs):
+        if before_outbound := kwargs.pop("before_outbound", None):
+            await before_outbound()
         if "influencers.club" in upstream_url:
             assert not blocked, "quota-protected provider must never receive the buyer's request"
             body = b'{"accounts":[{"user_id":"synthetic"}],"total":1,"credits_cost":0.01}'
@@ -185,4 +228,6 @@ async def test_hub_quota_refusal_has_zero_child_cost_but_preserves_other_step_bi
         assert not any(entry["name"] == "later" for entry in result["trace"])
     holds, entries = await _money()
     assert not holds
-    assert not [entry for entry in entries if entry.call_id == result["run_id"] + ":s1"]
+    blocked_entries = [entry for entry in entries if entry.call_id == result["run_id"] + ":s1"]
+    assert not [entry for entry in blocked_entries if entry.kind == "settle"]
+    assert sum(entry.amount_micro for entry in blocked_entries) == 0

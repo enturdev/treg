@@ -277,6 +277,7 @@ class CallContext:
     # and the parent charges or releases every one at the end (route.py `_close_deferred`).
     deferred_settles: list | None = None
     quota_admissions: set[tuple[int, str]] = field(default_factory=set)
+    quota_pending: tuple[tuple[int, str], ...] = ()
     # Scalar snapshots for root request logs; never resolve a target just for telemetry.
     tool_name: str | None = None
     endpoint_id: str | None = None

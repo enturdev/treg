@@ -43,14 +43,34 @@ def _enable(monkeypatch, limits=None, *, unavailable=False):
         return "allowed"
 
     monkeypatch.setattr(org_endpoint_quota, "admit", admit)
+
+    async def admit_many(targets):
+        before = used.copy()
+        for target in dict.fromkeys(targets):
+            outcome = await org_endpoint_quota.admit(*target)
+            if outcome != "allowed":
+                used.clear()
+                used.update(before)
+                return outcome, target
+        return "allowed", None
+
+    monkeypatch.setattr(org_endpoint_quota, "admit_many", admit_many)
     return attempts, used
 
 
 async def _assert_no_money():
     async with session_maker() as db:
         assert (await db.execute(select(Hold))).scalars().all() == []
-        assert (await db.execute(select(LedgerEntry).where(
-            LedgerEntry.kind.in_(["reserve", "settle"])))).scalars().all() == []
+        entries = (await db.execute(select(LedgerEntry).where(
+            LedgerEntry.kind.in_(["reserve", "release", "settle"])))).scalars().all()
+        assert not [entry for entry in entries if entry.kind == "settle"]
+        assert sum(entry.amount_micro for entry in entries) == 0
+
+
+async def _reject_before_send(*args, before_outbound=None, **kwargs):
+    assert before_outbound is not None
+    await before_outbound()
+    raise AssertionError("quota refusal must prevent the upstream send")
 
 
 @pytest.mark.parametrize("surface", ["call", "catalog/call", "table"])
@@ -58,13 +78,13 @@ async def _assert_no_money():
     (False, 429, "org_endpoint_quota_exceeded"),
     (True, 503, "org_endpoint_quota_unavailable"),
 ])
-async def test_denial_precedes_cache_money_and_upstream(
+async def test_denial_releases_money_without_serving_or_upstream(
     clients, monkeypatch, platform_on, surface, unavailable, status, code,
 ):
     monkeypatch.setattr(get_settings(), "table_enabled", True)
     attempts, _ = _enable(monkeypatch, {EP: 0}, unavailable=unavailable)
-    relay = AsyncMock(side_effect=AssertionError("upstream must not run"))
-    cache = AsyncMock(side_effect=AssertionError("cache must not run"))
+    relay = AsyncMock(side_effect=_reject_before_send)
+    cache = AsyncMock(return_value=None)
     overflow = AsyncMock(side_effect=AssertionError("overflow must not run"))
     monkeypatch.setattr(call_service, "relay", relay)
     monkeypatch.setattr(archive, "lookup", cache)
@@ -76,8 +96,7 @@ async def test_denial_precedes_cache_money_and_upstream(
     assert response.headers["X-Treg-Cost-Micro"] == "0"
     assert attempts == {EP: 1}
     assert await _balance(clients) == before
-    relay.assert_not_called()
-    cache.assert_not_called()
+    relay.assert_awaited_once()
     overflow.assert_not_called()
     await _assert_no_money()
 
@@ -156,10 +175,10 @@ async def test_overflow_checks_original_endpoint_once(clients, monkeypatch, over
         await _assert_no_money()
 
 
-@pytest.mark.parametrize("blocked", [FIND, "tomba.people.email.find", "treg.people.email.verify"])
-async def test_routed_parent_child_and_verification_cannot_fallback(
-    clients, monkeypatch, verifiers_on, blocked,
+async def test_exhausted_routed_parent_cannot_fallback(
+    clients, monkeypatch, verifiers_on,
 ):
+    blocked = FIND
     attempts, used = _enable(monkeypatch, {blocked: 0})
     seen = []
     monkeypatch.setattr(call_service, "relay", _relay({"tomba": [TOMBA_HIT]}, seen))
@@ -169,14 +188,14 @@ async def test_routed_parent_child_and_verification_cannot_fallback(
     assert response.json()["detail"]["error"] == "org_endpoint_quota_exceeded"
     assert response.headers["X-Treg-Cost-Micro"] == "0"
     assert attempts[blocked] == 1 and used[blocked] == 0
-    assert seen == (["tomba"] if blocked == "treg.people.email.verify" else [])
+    assert seen == []
     assert await _balance(clients) == before
     async with session_maker() as db:
         assert (await db.execute(select(Hold))).scalars().all() == []
         assert (await db.execute(select(LedgerEntry).where(LedgerEntry.kind == "settle"))).scalars().all() == []
 
 
-async def test_route_internal_polls_consume_once_per_endpoint(clients, monkeypatch, bounceban_on, fast_polls):
+async def test_route_internal_polls_do_not_consume_another_allowance(clients, monkeypatch, bounceban_on, fast_polls):
     attempts, used = _enable(monkeypatch, {VERIFY: 1, STATUS: 1})
     upstream = Upstream(VERIFYING, [VERIFYING, _finished("undeliverable")])
     monkeypatch.setattr(call_service, "relay", upstream)
@@ -184,32 +203,32 @@ async def test_route_internal_polls_consume_once_per_endpoint(clients, monkeypat
                                   headers={"X-Treg-Route-Prefer": "bounceban"})
     assert response.status_code == 200, response.text
     assert upstream.seen == ["submit", "poll", "poll"]
-    assert attempts == {"treg.people.email.verify": 1, VERIFY: 1, STATUS: 1}
-    assert used == {VERIFY: 1, STATUS: 1}
+    assert attempts == {"treg.people.email.verify": 1, VERIFY: 1}
+    assert used == {VERIFY: 1}
 
 
-async def test_route_poll_quota_error_propagates_instead_of_retrying(clients, monkeypatch, bounceban_on, fast_polls):
+async def test_route_internal_poll_ignores_a_rule_blocking_new_poll_calls(clients, monkeypatch, bounceban_on, fast_polls):
     attempts, _ = _enable(monkeypatch, {STATUS: 0})
-    upstream = Upstream(VERIFYING)
+    upstream = Upstream(VERIFYING, [_finished("deliverable")])
     monkeypatch.setattr(call_service, "relay", upstream)
     response = await clients.post("/call/treg.people.email.verify", json={"email": EMAIL},
                                   headers={"X-Treg-Route-Prefer": "bounceban"})
-    assert response.status_code == 429, response.text
-    assert response.json()["detail"]["error"] == "org_endpoint_quota_exceeded"
-    assert attempts[STATUS] == 1
-    assert upstream.seen == ["submit"]
+    assert response.status_code == 200, response.text
+    assert response.json()["output"]["status"] == "deliverable"
+    assert attempts[STATUS] == 0
+    assert upstream.seen == ["submit", "poll"]
 
 
 async def test_own_credential_catalog_call_obeys_exact_canonical_quota(clients, monkeypatch):
     await clients.post("/secrets", json={"name": "tikhub", "value": "SYNTHETIC-OWN-KEY"})
     attempts, _ = _enable(monkeypatch, {EP: 0})
-    relay = AsyncMock(side_effect=AssertionError("own-key upstream must not run"))
+    relay = AsyncMock(side_effect=_reject_before_send)
     monkeypatch.setattr(call_service, "relay", relay)
     response = await clients.get(f"/call/{EP}?aweme_id=7")
     assert response.status_code == 429, response.text
     assert response.json()["detail"]["endpoint_id"] == EP
     assert attempts == {EP: 1}
-    relay.assert_not_called()
+    relay.assert_awaited_once()
     await _assert_no_money()
 
 

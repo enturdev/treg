@@ -534,7 +534,9 @@ billable work without manufacturing a successful result.
 
 Routed tools and Enrich Arena may wait for an async child through the shared async bridge. Every
 poll still uses the ordinary call path, so BYOK remains unmetered and platform polls enforce task
-ownership. Foreground polling and the worker may observe the same terminal response, but the task
+ownership. Server-created polls continue the admitted submission without another quota check or
+increment; direct caller-initiated polls remain separate calls. Quota or other poll failures after
+a task ID exists preserve that handle and the pending reservation. Foreground polling and the worker may observe the same terminal response, but the task
 row lock lets only one close the original hold. A foreground timeout or inconclusive poll response
 returns a pending result with the reservation still open; the worker later settles or releases it.
 Terminal UI and routed results read the task's settled amount, while pending results expose only the
