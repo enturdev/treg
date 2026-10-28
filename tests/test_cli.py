@@ -919,7 +919,7 @@ def test_catalog_get_renders_params_siblings_and_the_command(monkeypatch, capsys
     assert [row["id"] for row in out["compare"]] == ["justoneapi.tiktok.video.comments", "tikhub.tiktok.video.comments"]
     assert out["params"][0] == {"in": "query", "name": "awemeId", "type": "string", "required": True,
                                 "note": "the post id"}, "required first"
-    assert out["example_query"] == '{"awemeId":"76662"}', "examples as the request carries them"
+    assert out["param_examples"] == {"awemeId": "76662"}
     assert out["call"] == "treg call justoneapi /api/tiktok/get-post-comment/v1 --query awemeId=76662"
     assert out["example_response"] == body["example_response"]
     keys = list(out)
@@ -965,7 +965,9 @@ def test_params_say_shared_prose_once_and_lead_with_the_endpoint_rule():
     assert list(view)[0] == "params_note"
     assert view["params_shared"] == [{"params": "title, city, company", "note": "Include/exclude string arrays."}]
     assert all(r["note"] is None for r in view["params"])
-    assert json.loads(view["example_body"])["has_email"] is True
+    assert view["param_examples"]["title"] == '{"include":["title"],"exclude":[]}', "JSON as sent, not repr"
+    assert view["param_examples"]["has_email"] == "true" and "example_body" not in view, \
+        "per-param examples are not a request: `call` is the runnable one"
 
 
 def test_a_credit_price_reads_as_dollars_with_the_credits_behind_it():
@@ -1057,6 +1059,16 @@ def test_catalog_search_explains_routing_once(monkeypatch, capsys):
     assert {r["job"] for r in out["results"]} == {"web.backlinks.list", "web.anchors.list"}
     assert out["results"][0]["price"] == "variable", "a routed row bills its children's misses: never 'free'"
     assert out["help"][0].startswith("treg catalog get <id>")
+
+
+def test_a_routed_detail_says_what_it_needs_and_prices_each_route_per_unit():
+    routing = {"contract": {"identity": [["q"], ["company_domain", "title"]]},
+               "plan": [{"endpoint_id": "a.x", "usd": 0.004, "accepts": [["q"]]}], "also": []}
+    assert cli._requires(routing) == "one of q | company_domain + title"
+    assert cli._requires({"contract": {"identity": [["email"]]}}) == "email"
+    view = cli._compare_view({}, {"routing": routing, "siblings": [
+        {"id": "a.x", "cost": {"type": "per_success", "usd": 0.004}}]}, {}, 10)
+    assert view["routes"][0]["price"] == "$0.004/success", "a per-success child bills no miss; the unit says so"
 
 
 def _home_registry(monkeypatch, *, me=None, orgs=None, balance_micro=1_000_000, balance=None, tools=(),

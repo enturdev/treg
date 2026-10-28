@@ -5955,6 +5955,7 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
         "price_note": cost.get("note"),
         "access": _access_detail(endpoint_id, cfg),
         "call": template,
+        "requires": _requires(body.get("routing")),
         **_params_view(e.get("input") or {}),
         **_price_table_view(cost),
         "async": _async_view(e.get("async")),
@@ -5977,6 +5978,14 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
     _emit(view, help_lines)
 
 
+def _requires(routing: dict | None) -> str | None:
+    """What a routed call needs at minimum: one of its contract's identity sets. Each identity param is
+    optional on its own, which is why the params table cannot say this."""
+    sets = ((routing or {}).get("contract") or {}).get("identity") or []
+    names = [" + ".join(s) for s in sets if s]
+    return None if not names else names[0] if len(names) == 1 else "one of " + " | ".join(names)
+
+
 def _access_detail(endpoint_id: str, cfg) -> str | None:
     """Which credential would serve THIS caller (own tool, team key, treg's metered key, none).
     Authenticated and best-effort: signed-out readers and older servers get nothing."""
@@ -5994,9 +6003,9 @@ def _params_view(inp: dict) -> dict:
     """What to SEND, by location, required first: the shortest working call is the required set. A
     nested object (Replicate's `input: {properties: …}`) becomes dotted names, which is what the
     caller types. Each note carries the param's own contract (closed set, default, range); prose that
-    three or more params share is said once, in `params_shared`. The examples are one JSON value per
-    location (`example_body`, `example_query`, `example_path`), as the request carries them. The
-    endpoint's own rule (`params_note`) comes before the table."""
+    three or more params share is said once, in `params_shared`. Each param's own example is listed
+    under `param_examples` as a JSON literal, so its type is unambiguous; together they are not a request
+    (`call` is the runnable one). The endpoint's own rule (`params_note`) comes before the table."""
     rows = []
 
     def walk(items: dict, where: str, prefix: str) -> None:
@@ -6014,14 +6023,8 @@ def _params_view(inp: dict) -> dict:
         if isinstance(inp.get(key), dict):
             walk(inp[key], where, "")
     rows.sort(key=lambda r: not r["required"])
-    examples: dict[str, dict] = {}
-    for r in rows:
-        if r["_spec"].get("example") not in (None, ""):
-            *parents, leaf = r["name"].split(".")
-            node = examples.setdefault(r["in"], {})
-            for part in parents:
-                node = node.setdefault(part, {})
-            node[leaf] = r["_spec"]["example"]
+    examples = {r["name"]: json.dumps(r["_spec"]["example"], ensure_ascii=False, separators=(",", ":"))
+                for r in rows if r["_spec"].get("example") not in (None, "")}
     counts: dict[str, list[str]] = {}
     for r in rows:
         if r["_prose"]:
@@ -6043,13 +6046,12 @@ def _params_view(inp: dict) -> dict:
     return {"params_note": inp.get("note"),
             "params_shared": [{"params": ", ".join(names), "note": prose} for prose, names in shared.items()] or None,
             "params": cli_view.table(rows, ("in", "name", "type", "required", "note")) or None,
-            **{f"example_{where}": json.dumps(examples[where], ensure_ascii=False, separators=(",", ":"))
-               for where in ("path", "query", "body") if where in examples}}
+            "param_examples": examples or None}
 
 
 def _as_sent(value) -> str:
     """A value as the request carries it: JSON, not Python's repr (`true`, `{"include": [...]}`)."""
-    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 def _price_table_view(cost) -> dict:
@@ -6119,12 +6121,15 @@ def _compare_view(e: dict, body: dict, cfg, limit: int) -> dict:
     then the unmeasured, `limit` rows at most."""
     routing = body.get("routing") or {}
     if routing.get("plan"):
-        plan = [{"id": c["endpoint_id"], "price": _usd_or_none(c.get("usd")),
+        # The plan carries a bare amount; the sibling row says per what (a per-success child bills no miss).
+        costs = {s["id"]: s.get("cost") for s in body.get("siblings") or []}
+        price = lambda i, usd: _cost_usd(costs[i]) if costs.get(i) else _usd_or_none(usd)  # noqa: E731
+        plan = [{"id": c["endpoint_id"], "price": price(c["endpoint_id"], c.get("usd")),
                  "accepts": " | ".join("+".join(v) for v in (c.get("accepts") or [])) or None,
                  "works": _pct(c.get("works")), "hit": _pct(c.get("hit_rate")),
                  "skipped": c.get("skipped") or ("exhausted" if c.get("exhausted") else None)}
                 for c in routing["plan"]]
-        also = [{"id": a["endpoint_id"], "price": _usd_or_none(a.get("usd"))} for a in routing.get("also") or []]
+        also = [{"id": a["endpoint_id"], "price": price(a["endpoint_id"], a.get("usd"))} for a in routing.get("also") or []]
         return {"routes_note": f"the order a call tries, own keys first at call time; {_METRICS_NOTE}",
                 "routes": cli_view.table(plan, ("id", "price", "accepts", "works", "hit", "skipped")),
                 "route_headers": routing.get("headers") or None,

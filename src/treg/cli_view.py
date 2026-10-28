@@ -3,7 +3,7 @@
 Every reader of this CLI is a coding agent. A view is a plain dict; `render` encodes it with the
 reference TOON encoder, except that a table is used only for several narrow rows: one row, or rows
 wider than `TABLE_MAX_COLUMNS`, print field by field so each value stays beside its name. Commands
-and request examples (`VERBATIM_KEYS`, `help`) print as they are typed, unquoted, so they can be
+and request values (`VERBATIM_KEYS`, `help`) print as they are typed, unquoted, so they can be
 copied (https://axi.md)."""
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import json
 from typing import Any
 
 TABLE_MAX_COLUMNS = 8
-VERBATIM_KEYS = frozenset({"call", "example_path", "example_query", "example_body"})
+VERBATIM_KEYS = frozenset({"call", "param_examples"})
 
 
 def table(rows: list[dict[str, Any]], fields: tuple[str, ...]) -> list[dict[str, Any]]:
@@ -56,7 +56,7 @@ def render(view: dict[str, Any], help_lines: list[str] | None = None) -> str:
     for key, value in view.items():
         if value is None:
             continue
-        text = f"{key}: {value}" if key in VERBATIM_KEYS else _encode({key: value})
+        text = _verbatim(key, value) if key in VERBATIM_KEYS else _encode({key: value})
         if "\n" not in text:
             lines.append(text)
             continue
@@ -69,6 +69,12 @@ def render(view: dict[str, Any], help_lines: list[str] | None = None) -> str:
     if help_lines:
         paragraphs.append("\n".join([f"help[{len(help_lines)}]:"] + [f"  - {_help_item(line)}" for line in help_lines]))
     return "\n\n".join(paragraphs)
+
+
+def _verbatim(key: str, value: Any) -> str:
+    if isinstance(value, dict):
+        return "\n".join([f"{key}:"] + [f"  {k}: {v}" for k, v in value.items()])
+    return f"{key}: {value}"
 
 
 def _help_item(line: str) -> str:
