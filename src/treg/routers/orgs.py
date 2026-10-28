@@ -475,15 +475,22 @@ async def list_orgs(
 
 @app.get("/home")
 async def home(
-    caller: Caller = Depends(require_member),
+    request: Request,
     x_treg_token: str = Header(default=""),
     x_treg_org: str = Header(default=""),
     treg_session: str = Cookie(default=""),
     db: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Bare `treg` in one round trip."""
-    count = len(await _visible_orgs(caller.user.id, x_treg_token, x_treg_org, treg_session, db))
-    return await home_app.summary(db, caller, teams=count)
+    """Bare `treg` in one round trip. A member (an agent key included) answers in full; a signed-in
+    user whose team does not resolve (none yet, or a stale active one) answers with `team: null`
+    instead of a refusal; an invalid or suspended identity is refused as everywhere else."""
+    try:
+        caller = await require_member(request, x_treg_token, x_treg_org, treg_session, db)
+        user = caller.user
+    except HTTPException:
+        caller, user = None, await require_identity(request, x_treg_token, x_treg_org, treg_session, db)
+    count = len(await _visible_orgs(user.id, x_treg_token, x_treg_org, treg_session, db))
+    return await home_app.summary(db, user.email, caller, teams=count)
 
 
 app = APIRouter()

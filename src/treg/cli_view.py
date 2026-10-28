@@ -67,16 +67,18 @@ def render(view: dict[str, Any], help_lines: list[str] | None = None) -> str:
     if lines:
         paragraphs.append("\n".join(lines))
     if help_lines:
-        paragraphs.append("\n".join([f"help[{len(help_lines)}]:"] + [f"  - {_help_item(line)}" for line in help_lines]))
+        paragraphs.append("\n".join([f"help[{len(help_lines)}]:"]
+                                    + [f"  - {_as_typed(line, list_item=True)}" for line in help_lines]))
     return "\n\n".join(paragraphs)
 
 
 def _verbatim(key: str, value: Any) -> str:
-    """Values as typed; keys still follow TOON's quoting (`"person_titles[]"`), or a reader would take
-    the brackets for an array header."""
+    """A command as typed where TOON reads it back unchanged; a block of JSON literals as written,
+    so `"76662"` reads as a string. Keys still follow TOON's quoting (`"person_titles[]"`), or a
+    reader would take the brackets for an array header."""
     if isinstance(value, dict):
         return "\n".join([f"{_key(key)}:"] + [f"  {_key(k)}: {v}" for k, v in value.items()])
-    return f"{_key(key)}: {value}"
+    return f"{_key(key)}: {_as_typed(value)}"
 
 
 def _key(key: str) -> str:
@@ -84,12 +86,17 @@ def _key(key: str) -> str:
     return encode({key: 0})[:-len(": 0")]
 
 
-def _help_item(line: str) -> str:
-    """A command as typed; quoted only when `: ` would make a TOON reader take it for a field."""
-    if ": " not in line:
-        return line
-    from toon_format import encode
-    return encode({"h": line})[len("h: "):]
+def _as_typed(text: str, *, list_item: bool = False) -> str:
+    """`text` unquoted when a TOON reader gets it back as the same string, quoted otherwise (a `: `
+    inside a list item would read as a field)."""
+    from toon_format import decode, encode
+    probe = f"v[1]:\n  - {text}" if list_item else f"v: {text}"
+    try:
+        if decode(probe) == {"v": [text] if list_item else text}:
+            return text
+    except Exception:  # noqa: BLE001 - any decode failure means the plain form is not safe
+        pass
+    return encode({"v": text})[len("v: "):]
 
 
 def render_json(view: dict[str, Any], help_lines: list[str] | None = None) -> str:

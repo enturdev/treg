@@ -885,6 +885,13 @@ def _fail(error: str, message: str, help_lines: list[str] | None = None, **detai
     sys.exit(1)
 
 
+def _relay_json(r: httpx.Response) -> None:
+    """`--json` on a view command: the server's JSON as received, exit 1 on a refusal."""
+    print(r.text)
+    if r.status_code >= 400:
+        sys.exit(1)
+
+
 def _fail_response(r: httpx.Response) -> NoReturn:
     body = _json_dict(r)
     detail = body.get("detail", body) if body else None
@@ -4407,8 +4414,8 @@ def cmd_version(args, cfg) -> None:
 
 
 def _home_description(catalog_tools: str | None = None) -> str:
-    """The slogan, with the catalog's size from the registry (`/home`), or a floor an older one keeps true."""
-    return f"The tool catalog for your agent. Search and call {(catalog_tools or '4000+').replace(',', '')} tools"
+    """The slogan, with the catalog's size as the registry counts it (`/home`); no number is typed here."""
+    return f"The tool catalog for your agent. Search and call {catalog_tools or 'its'} tools"
 
 
 def _quietly(read):
@@ -4430,22 +4437,34 @@ def _home_state(cfg: dict) -> dict:
     if not (os.environ.get("TREG_TOKEN") or cfg.get("token")):
         state["account"] = None
         return state
-    with _client(cfg) as c, ThreadPoolExecutor(max_workers=3) as pool:
-        c.timeout = httpx.Timeout(5.0)  # an orientation glance of up to four reads, not a relayed call
+    with _client(cfg) as c:
+        c.timeout = httpx.Timeout(5.0)  # an orientation glance, not a relayed call
         try:
             home = c.get("/home")
         except httpx.HTTPError as exc:
             state["unavailable"] = f"{type(exc).__name__} reaching the registry"
             return state
-        body = _json_dict(home) if home.status_code == 200 else {}
-        if body.get("email") and body.get("org"):
-            return state | {"account": body["email"], "teams": body.get("teams"), "team": body["org"],
-                            "role": body.get("role"), "catalog_tools": body.get("catalog_tools"),
-                            **({"balance_micro": body["balance_micro"]} if isinstance(body.get("balance_micro"), int) else {}),
-                            **({"own_tools": body["own_tools"]} if isinstance(body.get("own_tools"), list) else {})}
-        # An older registry has no /home, and no active team or a stale one is refused there: the
-        # separate reads below name what is missing.
-        # Only the balance waits on another read (it needs the team id); the rest go out together.
+        if home.status_code != 404:
+            return state | _home_answer(home)
+        return _home_state_by_parts(cfg, c, state)
+
+
+def _home_answer(home: httpx.Response) -> dict:
+    """`/home`'s answer as home state, or what went wrong with it."""
+    if home.status_code == 401:
+        return {"account": None, "account_error": "token rejected"}
+    if home.status_code >= 500:  # the right registry, having a bad moment
+        return {"registry_error": f"HTTP {home.status_code} from /home"}
+    body = _json_dict(home)
+    if home.status_code != 200 or "account" not in body:  # something answers here, but not a treg registry
+        return {"unavailable": f"HTTP {home.status_code} from /home is not a treg answer"}
+    return body
+
+
+def _home_state_by_parts(cfg: dict, c: httpx.Client, state: dict) -> dict:
+    """The same state from a registry older than `/home`, in separate reads. Only the balance waits
+    on another (it needs the team id); the rest go out together."""
+    with ThreadPoolExecutor(max_workers=3) as pool:
         me_f = pool.submit(c.get, "/auth/me")
         rows_f = pool.submit(_quietly, lambda: _org_rows(c))
         tools_f = pool.submit(_quietly, lambda: c.get("/tools"))
@@ -4501,7 +4520,7 @@ def _home_help(state: dict) -> list[str]:
     elif state.get("balance_micro") is not None and state["balance_micro"] <= 0:
         out.append("treg topup   # catalog calls on treg's key spend the balance")
     out += ["treg catalog search \"<task>\"   # find a tool for a job, with prices",
-            "treg catalog get <id>   # params, price, a ready treg call line"]
+            _GET_HELP]
     if state.get("own_tools"):
         out.append("treg call <tool>/<path>   # an own_tools entry; <path> is the upstream API's own")
     out.append("treg --help   # every command")
@@ -5205,7 +5224,6 @@ def _native_amount(value, currency: str, meter: str = "") -> str:
     return f"${value:g}" if currency in ("USD", "") else f"{currency} {value:g}"
 
 
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _pinned_provider(cfg: dict, capability: str | None) -> str | None:
@@ -5265,9 +5283,7 @@ def cmd_catalog(args, cfg) -> None:
             _hidden = "?include_hidden=1" if getattr(args, "show_all", False) else ""
             r = c.get(f"/catalog/platforms/{quote(args.platform, safe='')}{_hidden}")
     if _JSON_OVERRIDE:
-        print(r.text)
-        if r.status_code >= 400:
-            sys.exit(1)
+        _relay_json(r)
         return
     if r.status_code != 200:
         _fail_response(r)
@@ -5287,14 +5303,14 @@ def cmd_catalog(args, cfg) -> None:
     own_key = any(e["provider"] in connected for _, e in endpoints)
     fields = ("id", "job", "price") + (("own_key",) if own_key else ()) + ("name",)
     rows = [{"id": e["id"], "job": job, "price": _cost_usd(e.get("cost")), "own_key": e["provider"] in connected,
-             "name": _brief(e.get("name") or e.get("summary") or "")} for job, e in endpoints]
+             "name": _clip(e.get("name") or e.get("summary") or "", 120)} for job, e in endpoints]
     jobs = [{"job": cap["id"], "does": cap.get("description")} for cap in data.get("capabilities", [])]
     _emit({"platform": data["platform"]["slug"], "label": data["platform"]["label"],
            "jobs": cli_view.table(jobs, ("job", "does")) or None,
            "endpoints": cli_view.table(rows, fields),
-           "routed": "a treg.<job> id lets treg pick the provider (own keys first, then cheapest per hit); any other id is one provider"
+           "routed": f"a treg.<job> id {_ROUTED_NOTE}; any other id is one provider"
            if any(e.get("kind") == "routed" for _, e in endpoints) else None},
-          ["treg catalog get <id>   # params, price, a ready treg call line"])
+          [_GET_HELP])
 
 
 def _cost_usd(cost: dict | None) -> str:
@@ -5331,8 +5347,12 @@ def _cost_usd(cost: dict | None) -> str:
     return f"${usd:.3g}/{unit}"
 
 
+_GET_HELP = "treg catalog get <id>   # params, price, a ready treg call line"
+_ROUTED_NOTE = "lets treg pick the provider (own keys first, then cheapest per hit); its price varies"
+
+
 def _clip(text: str, width: int) -> str:
-    text = (text or "").strip()
+    text = " ".join((text or "").split())
     return text if len(text) <= width else text[: width - 1] + "…"
 
 
@@ -5367,8 +5387,8 @@ def _catalog_search(query: str, args, cfg) -> None:
     # the token, when there is one, only says who is searching (the judged search is capped per caller)
     with _client(cfg, auth=not added) as c:
         r = c.get("/catalog/search", params=params)
-    if _JSON_OVERRIDE and r.status_code == 200:
-        print(json.dumps(r.json(), ensure_ascii=False))
+    if _JSON_OVERRIDE:
+        _relay_json(r)
         return
     if r.status_code != 200:
         _fail_response(r)
@@ -5404,23 +5424,19 @@ def _catalog_search(query: str, args, cfg) -> None:
         if e.get("kind") == "routed" and e.get("children_hidden"):
             help_lines.append(f"treg catalog get {e['id']}   # all providers of {e.get('capability')}")
         out_rows.append({"id": e["id"], "job": e.get("capability"), "price": _cost_usd(e.get("cost")),
-                         "added": e.get("added"), "own_key": e["provider"] in connected, "name": _brief(name)})
+                         "added": e.get("added"), "own_key": e["provider"] in connected, "name": _clip(name, 120)})
     view |= {"total": body.get("total", len(rows)), "results": cli_view.table(out_rows, fields)}
     if body.get("verdict") == "closest":
         view["note"] = "no exact fit: read treg catalog get before relying on one, or say the task differently"
     elif body.get("verdict") == "keyword" and body.get("reason") not in (None, "", "not_task"):
         view["note"] = "ranked by keywords only (the judge did not answer)"
     if any(e.get("kind") == "routed" for e in rows):
-        view["routed"] = "a treg.<job> id lets treg pick the provider (own keys first, then cheapest per hit); any other id is one provider"
-    help_lines.insert(0, "treg catalog get <id>   # params, price, a ready treg call line")
+        view["routed"] = f"a treg.<job> id {_ROUTED_NOTE}; any other id is one provider"
+    help_lines.insert(0, _GET_HELP)
     if body.get("total", 0) > len(rows):
         help_lines.append(f"treg catalog search \"{query}\" --limit {min(body['total'], 100)}")
     _emit(view, help_lines)
 
-
-def _brief(text: str, limit: int = 120) -> str:
-    text = " ".join((text or "").split())
-    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _feedback_error(code: str, message: str, **details) -> None:
@@ -5923,7 +5939,7 @@ def _hub_view(e: dict) -> dict:
     chk = e.get("check") or {}
     out = e.get("output") or {}
     inputs = [{"name": k, "type": v.get("type"), "required": "default" not in v,
-               "default": json.dumps(v["default"]) if "default" in v else None, "max": v.get("max"),
+               "default": _as_sent(v["default"]) if "default" in v else None, "max": v.get("max"),
                "note": v.get("note")} for k, v in (e.get("inputs") or {}).items()]
     ct = e.get("call_template") or {}
     return {
@@ -5947,9 +5963,7 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
     with _client(cfg, auth=False) as c:
         r = c.get(f"/catalog/endpoints/{quote(endpoint_id, safe='')}")
     if _JSON_OVERRIDE:
-        print(r.text)
-        if r.status_code >= 400:
-            sys.exit(1)
+        _relay_json(r)
         return
     if r.status_code == 404 and (job := _job_view(endpoint_id, cfg)):
         _emit(*job)
@@ -5982,6 +5996,9 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
         "native_price": _native_amount(cost["value"], cost["currency"])
         if cost.get("currency", "USD") != "USD" and cost.get("value") is not None and cost.get("usd") is not None else None,
         "price_note": cost.get("note"),
+        "overflow_price": f"${e['overflow_price_usd']:g}/{e.get('overflow_price_unit') or 'call'} through "
+                          f"{e.get('overflow_via')} when treg's own account for it is out"
+        if e.get("overflow_price_usd") is not None else None,
         "access": _access_detail(endpoint_id, cfg),
         "call": template,
         "requires": _requires(body.get("routing")),
@@ -6033,19 +6050,11 @@ def _job_view(job: str, cfg) -> tuple[dict, list[str]] | None:
     members = [x for x in [body["endpoint"], *(body.get("siblings") or [])] if x.get("kind") != "routed"]
     pinned = _pinned_provider(cfg, job)
     ranked = sorted((x for x in members if not pinned or x["provider"] == pinned), key=_compare_rank)
-    rows = [{"id": x["id"], "price": _cost_usd(x.get("cost")), "works": _pct((x.get("observed") or {}).get("ok_rate")),
-             "calls": (x.get("observed") or {}).get("samples"), "hit": _pct((x.get("observed") or {}).get("hit_rate")),
-             "p50": _duration((x.get("observed") or {}).get("p50_ms")),
-             "last_ok_days": (x.get("observed") or {}).get("last_ok_days"), "verified": x.get("verified")}
-            for x in ranked]
     view = {"job": job, "does": cap.get("description"), "providers": len(ranked),
-            "routed": f"{routed} lets treg pick the provider (own keys first, then cheapest per hit); price variable"
-            if routed else None,
-            "pinned": f"your team pins this job to {pinned}; other providers are refused" if pinned else None,
-            "compare_note": _METRICS_NOTE + "; last_ok_days is measured, verified is the catalog's hand-run stamp",
-            "compare": cli_view.table(rows, ("id", "price", "works", "calls", "hit", "p50", "last_ok_days", "verified"))}
+            "routed": f"{routed} {_ROUTED_NOTE}" if routed else None, "pinned": _pinned_note(pinned, job),
+            "compare_note": _COMPARE_NOTE, "compare": _compare_rows(ranked)}
     help_lines = [f"treg catalog get {routed}   # the routed plan, in the order a call tries"] if routed else []
-    return view, help_lines + ["treg catalog get <id>   # params, price, a ready treg call line"]
+    return view, help_lines + [_GET_HELP]
 
 
 def _access_detail(endpoint_id: str, cfg) -> str | None:
@@ -6183,15 +6192,13 @@ def _compare_view(e: dict, body: dict, cfg, limit: int) -> dict:
     then the unmeasured, `limit` rows at most."""
     routing = body.get("routing") or {}
     if routing.get("plan"):
-        # The plan carries a bare amount; the sibling row says per what (a per-success child bills no miss).
-        costs = {s["id"]: s.get("cost") for s in body.get("siblings") or []}
-        price = lambda i, usd: _cost_usd(costs[i]) if costs.get(i) else _usd_or_none(usd)  # noqa: E731
-        plan = [{"id": c["endpoint_id"], "price": price(c["endpoint_id"], c.get("usd")),
+        price = lambda row: _cost_usd(row["cost"]) if row.get("cost") else _usd_or_none(row.get("usd"))  # noqa: E731
+        plan = [{"id": c["endpoint_id"], "price": price(c),
                  "accepts": " | ".join("+".join(v) for v in (c.get("accepts") or [])) or None,
                  "works": _pct(c.get("works")), "hit": _pct(c.get("hit_rate")),
                  "skipped": c.get("skipped") or ("exhausted" if c.get("exhausted") else None)}
                 for c in routing["plan"]]
-        also = [{"id": a["endpoint_id"], "price": price(a["endpoint_id"], a.get("usd"))} for a in routing.get("also") or []]
+        also = [{"id": a["endpoint_id"], "price": price(a)} for a in routing.get("also") or []]
         return {"routes_note": f"the order a call tries, own keys first at call time; {_METRICS_NOTE}",
                 "routes": cli_view.table(plan, ("id", "price", "accepts", "works", "hit", "skipped")),
                 "route_headers": routing.get("headers") or None,
@@ -6202,20 +6209,30 @@ def _compare_view(e: dict, body: dict, cfg, limit: int) -> dict:
         return {}
     pinned = _pinned_provider(cfg, e.get("capability"))
     others = sorted((s for s in sibs if not pinned or s["provider"] == pinned), key=_compare_rank)
-    rows = [{"id": s["id"], "price": _cost_usd(s.get("cost")), "works": _pct((s.get("observed") or {}).get("ok_rate")),
-             "calls": (s.get("observed") or {}).get("samples"), "hit": _pct((s.get("observed") or {}).get("hit_rate")),
-             "p50": _duration((s.get("observed") or {}).get("p50_ms")),
-             "last_ok_days": (s.get("observed") or {}).get("last_ok_days"), "verified": s.get("verified")}
-            for s in [e, *others][:limit]]
     return {"compare_total": len(others) + 1 if len(others) + 1 > limit else None,
-            "compare_note": _METRICS_NOTE + "; last_ok_days is measured, verified is the catalog's hand-run stamp",
-            "compare": cli_view.table(rows, ("id", "price", "works", "calls", "hit", "p50", "last_ok_days", "verified")),
-            "pinned": f"your team pins this job to {pinned}; other providers are refused "
-                      f"(admin: treg org unpin {e.get('capability')})" if pinned else None}
+            "compare_note": _COMPARE_NOTE, "compare": _compare_rows([e, *others][:limit]),
+            "pinned": _pinned_note(pinned, e.get("capability"))}
 
 
 _METRICS_NOTE = ("works is the share of calls the provider answered without error; hit is the share that "
                  "found something, so a provider can work 100% and still miss; both are measured by treg")
+_COMPARE_NOTE = _METRICS_NOTE + "; last_ok_days is measured, verified is the catalog's hand-run stamp"
+_COMPARE_FIELDS = ("id", "price", "works", "calls", "hit", "p50", "last_ok_days", "verified")
+
+
+def _compare_rows(endpoints: list[dict]) -> list[dict]:
+    rows = []
+    for x in endpoints:
+        obs = x.get("observed") or {}
+        rows.append({"id": x["id"], "price": _cost_usd(x.get("cost")), "works": _pct(obs.get("ok_rate")),
+                     "calls": obs.get("samples"), "hit": _pct(obs.get("hit_rate")), "p50": _duration(obs.get("p50_ms")),
+                     "last_ok_days": obs.get("last_ok_days"), "verified": x.get("verified")})
+    return cli_view.table(rows, _COMPARE_FIELDS)
+
+
+def _pinned_note(pinned: str | None, job: str | None) -> str | None:
+    return f"your team pins this job to {pinned}; other providers are refused (admin: treg org unpin {job})" \
+        if pinned else None
 
 
 def _compare_rank(s: dict) -> tuple:

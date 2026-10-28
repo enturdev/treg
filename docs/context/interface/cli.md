@@ -62,9 +62,10 @@ Nearly every caller is an agent, so `treg` with no arguments answers with live s
 usage error that costs it a turn on `--help`. The top-level subparsers are not required and the
 parser's default `fn` is `cmd_home`, so `--org` and `--json` apply as everywhere else. `_home_state`
 reads it all in one round trip from `GET /home` (`application/home.py`: account, active team, role,
-team count, balance, own tool names, and the catalog's size for the slogan). An older registry has no
-`/home`, and one with no active team or a stale one refuses it; then `/auth/me`, `/orgs` and `/tools`
-go out together and the balance follows once the team is known. The team resolves the way `balance`
+team count, balance, own tool names, and the catalog's size for the slogan; with no team yet or a
+stale active one it still answers, with `team: null`). Only a registry older than `/home` (a 404)
+gets the separate reads, `_home_state_by_parts`: `/auth/me`, `/orgs` and `/tools` go out together and
+the balance follows once the team is known. The team resolves the way `balance`
 and `whoami` do: `/orgs` (`_org_rows`, picked by `_pick_org`: the effective org, else the active
 one), falling back to the team `/auth/me` names when `/orgs` refuses an agent key. `_active_org`
 (and `_active_org_id` on top of it) is that same order for every other command. Each read stands
@@ -533,8 +534,8 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   `params` by location with required first (`_params_view`), each param's own example as a JSON
   literal (`param_examples`; together they are not a request), any `price_table` and
   `async` descriptor, the `example_response`, then the alternatives: `routes` (the plan, in order) and
-  `also` on a routed id (each child priced per its unit from its sibling row, so `/success` says a miss
-  is free), otherwise `compare` with a one-line `compare_note` (works is answered
+  `also` on a routed id (each child priced per its unit from the `cost` the server puts on its plan or
+  `also` row, so `/success` says a miss is free), otherwise `compare` with a one-line `compare_note` (works is answered
   without error, hit is found something), the endpoint itself and then the job's other providers,
   measured ones by success rate and price before the unmeasured, `--limit` rows (10 by default) with
   `compare_total` when there are more (`price`, `works` over `calls`, `hit`, `p50`, `last_ok_days` measured from the last real success, `verified` the

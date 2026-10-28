@@ -225,11 +225,13 @@ def _quote_skip(ep: dict, cat) -> str | None:
     return None
 
 
-def _plan_row(c) -> dict:
+def _plan_row(c, cat) -> dict:
     """One quote line, token-frugal: what an agent needs to pick or set a ceiling. Measured rates
-    ride only when they exist; the unmeasured case says nothing rather than four nulls."""
+    ride only when they exist; the unmeasured case says nothing rather than four nulls. `cost` says
+    per what the child bills, so a per-success one reads as billing no miss."""
     row = {"endpoint_id": c.endpoint["id"], "accepts": [list(v) for v in c.adapter.accepts],
-           "usd": (c.price_micro / 1_000_000) if c.price_micro is not None else None}
+           "usd": (c.price_micro / 1_000_000) if c.price_micro is not None else None,
+           "cost": catalog_store.sibling_view(c.endpoint, c.endpoint["provider"], cat)["cost"]}
     if c.hit_rate is not None:
         row["hit_rate"] = c.hit_rate
         row["usd_per_hit"] = c.expected_cost_per_hit / 1_000_000
@@ -680,13 +682,13 @@ async def catalog_endpoint(
                          "miss": contract.miss, "derive": contract.derive} if contract else None,
             # A child the router would not call on treg's key (`route.py` drops it the same way)
             # stays in the plan for its `accepts`, ranked after the rest and saying why.
-            "plan": [_plan_row(c) for c in rank([c for c in cands if not _quote_skip(c.endpoint, cat)])]
-                    + [_plan_row(c) | {"skipped": _quote_skip(c.endpoint, cat)}
+            "plan": [_plan_row(c, cat) for c in rank([c for c in cands if not _quote_skip(c.endpoint, cat)])]
+                    + [_plan_row(c, cat) | {"skipped": _quote_skip(c.endpoint, cat)}
                        for c in rank([c for c in cands if _quote_skip(c.endpoint, cat)])],
             # The same job from providers whose adapter is not (yet) verified: not chosen by the
             # router, still callable by id — the search page groups them under this row, so the
             # page it points at must name them too.
-            "also": [{"endpoint_id": s["id"], "usd": ((s.get("cost") or {}).get("usd"))}
+            "also": [{"endpoint_id": s["id"], "usd": ((s.get("cost") or {}).get("usd")), "cost": s.get("cost")}
                      for s in siblings if s["id"] not in set(ep.get("routed_children") or [])],
             "headers": {"X-Treg-Route-Waterfall": "on by default: a miss tries the next provider; 0 = stop at the first miss",
                         "X-Treg-Route-Max-Cost": "USD ceiling for the whole call (default 1.00)",

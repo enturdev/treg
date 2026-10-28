@@ -14,14 +14,16 @@ from ..models import Tool
 from . import billing
 
 
-async def summary(db: AsyncSession, caller: Caller, *, teams: int) -> dict:
+async def summary(db: AsyncSession, email: str, caller: Caller | None, *, teams: int) -> dict:
+    """`caller` is None when no team resolves (none yet, or a stale active one): the account and its
+    team count still answer, so the CLI can name the fix in the same round trip."""
+    out = {"account": email, "teams": teams, "team": None,
+           "catalog_tools": catalog_store.headline_counts(catalog_store.load())[0].replace(",", "")}
+    if caller is None:
+        return out
     balance = await money.balance_of(db, caller.org_id)
     # Reading the balance is one of auto top-up's trigger points, as on GET /orgs/{id}/balance.
     billing.maybe_schedule_autotopup(caller.org)
     rows = (await db.execute(select(Tool).where(Tool.org_id == caller.org_id))).scalars().all()
-    return {
-        "email": caller.email, "org_id": caller.org_id, "org": caller.org.slug, "role": caller.role,
-        "teams": teams, "balance_micro": balance,
-        "own_tools": [t.name for t in rows if access_policy._tool_usable(caller, t)],
-        "catalog_tools": catalog_store.headline_counts(catalog_store.load())[0],
-    }
+    return out | {"team": caller.org.slug, "role": caller.role, "balance_micro": balance,
+                  "own_tools": [t.name for t in access_policy.usable_tools(caller, rows)]}
