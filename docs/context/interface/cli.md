@@ -365,7 +365,7 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   unknown bin isn't server-allow-listed, so it runs locally until an admin allow-lists it. Brains in
   `providers.py` + `skills.py`; see [env-import](env-import.md).
 - **`call`** (`target`, optional `path`; `--method`, `--query K=V` repeatable, `--data` (also
-  `@PATH`, `@-`; body rules in USAGE.md), `--file`, `--content-type`, `--header 'K: V'`
+  `@PATH`, `@-`; body rules in USAGE.md), `--file`, `--content-type`, `--header 'K: V'` (`-H`, the spelling agents bring from curl)
   repeatable) → three shapes: named `call <tool> <path>`, agent-native
   single URL `call https://host/full/path` (path omitted), or a **catalog endpoint id**
   `call tikhub.tiktok.video.comments` — all hit `/call/<rest>`. **`--header`** adds an
@@ -532,7 +532,8 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   (`GET /catalog/endpoints/{id}`), in the order an agent acts on it: what it does, `price` in USD with
   `native_price` and the whole `price_note`, `access` (which credential would serve this caller), the
   paste-ready `call` (the catalog's verified test request, the one runnable example), on a routed id
-  `requires` (one of its contract's identity sets, since each identity param is optional alone), the
+  `call_capped` (the same call with `--header 'X-Treg-Route-Max-Cost: 0.05'`, so the way every
+  `route_headers` option is passed is shown) and `requires` (one of its contract's identity sets, since each identity param is optional alone), the
   endpoint's own rule (`params_note`), prose three or more params share said once (`params_shared`),
   `params` by location with required first (`_params_view`), each param's own example as a JSON
   literal (`param_examples`; together they are not a request), any `price_table` and
@@ -548,7 +549,8 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   positional **verbs** inside `cmd_catalog`, not argparse subcommands, so `treg catalog <platform>`
   keeps working and a multi-word query needs no quoting. An id that is no endpoint but a job
   (`treg catalog get people.search`, `_job_view`) lists every endpoint of that job, hidden kinds
-  included and the routed id ranked like any other, as `compare` ranks them; an id that is both (a one-provider
+  included and the routed id ranked like any other, as `compare` ranks them, led by the routed id's
+  `call` when there is one (a ranked list alone sent weaker agents to its top row); an id that is both (a one-provider
   job) answers as the endpoint, and the endpoint detail's help points at its job when `compare` was
   cut short. An id that is neither is the `unknown_endpoint`
   error with the server's `did_you_mean` ids and the command for the first one, or a search built from

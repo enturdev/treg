@@ -6009,6 +6009,8 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
         if e.get("overflow_price_usd") is not None else None,
         "access": _access_detail(endpoint_id, cfg),
         "call": template,
+        # how a route option is passed, shown on the call itself
+        "call_capped": _with_route_cap(template) if (body.get("routing") or {}).get("plan") else None,
         "requires": _requires(body.get("routing")),
         **_params_view(e.get("input") or {}),
         **_price_table_view(cost),
@@ -6030,6 +6032,12 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
     if others:
         help_lines.append(f"treg catalog get {others[0]}   # the next way to do this job in compare")
     _emit(view, help_lines)
+
+
+def _with_route_cap(template: str) -> str:
+    """The ready call with a cost ceiling: every `route_headers` option rides the same `--header`."""
+    cap = "--header 'X-Treg-Route-Max-Cost: 0.05'"
+    return template.replace(" --data ", f" {cap} --data ", 1) if " --data " in template else f"{template} {cap}"
 
 
 def _requires(routing: dict | None) -> str | None:
@@ -6059,10 +6067,14 @@ def _job_view(job: str, cfg) -> tuple[dict, list[str]] | None:
     pinned = _pinned_provider(cfg, job)
     ranked = sorted((x for x in members if not pinned or x["provider"] == pinned), key=_compare_rank)
     view = {"job": job, "does": cap.get("description"),
+            "call": body.get("call_template") if routed else None,
+            "routed": f"{routed} {_ROUTED_NOTE}; call it unless you need one provider's own fields"
+            if routed else None,
             "providers": len({x["provider"] for x in ranked if x.get("kind") != "routed"}),
-            "routed": f"{routed} {_ROUTED_NOTE}" if routed else None, "pinned": _pinned_note(pinned, job),
+            "pinned": _pinned_note(pinned, job),
             "compare_note": _COMPARE_NOTE, "compare": _compare_rows(ranked)}
-    help_lines = [f"treg catalog get {routed}   # the routed plan, in the order a call tries"] if routed else []
+    help_lines = [f"treg catalog get {routed}   # what the routed call needs, its plan and route options"] \
+        if routed else []
     return view, help_lines + [_GET_HELP]
 
 
@@ -6842,7 +6854,7 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("--data", help="request body (string); @PATH reads a file, @- stdin"); cl.add_argument("--file", help="request body from a file")
     cl.add_argument("--content-type", dest="content_type", metavar="TYPE",
                     help="Content-Type for the body (default: sniffed — a body that parses as JSON sends application/json)")
-    cl.add_argument("--header", action="append", default=[], metavar="'K: V'",
+    cl.add_argument("-H", "--header", action="append", default=[], metavar="'K: V'",
                     help="an extra request header (repeatable), e.g. --header 'login-customer-id: 1234567890'. "
                          "Injected credentials always win.")
     cl.add_argument("--upload", action="append", default=[], metavar="NAME=@FILE",
