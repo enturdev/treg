@@ -6,6 +6,9 @@ source:
 limits: "10 requests/second per key"
 pricing_url: https://maildignity.com/#pricing
 
+# MailDignity audits outgoing email drafts for tone, presumptuous phrasing, artificial flattery,
+# and aggressive sales tactics, providing structural verdicts, detected issues, and respectful rewrites.
+
 proposed_capabilities:
   ai-judge.email.audit: "Audit an email draft for tone, pushiness, presumptions, and flattery, and suggest respectful rewrites"
   ai-judge.email.check_fast: "Lightweight heuristic pre-flight check on an email draft to catch obvious red flags"
