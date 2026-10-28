@@ -771,6 +771,15 @@ async def _findymail(c, key):
             "note": f"verifier {d.get('verifier_credits')} left (separate pool)"}
 
 
+async def _anymailfinder(c, key):
+    d = await _get(c, "https://api.anymailfinder.com/v5.1/account",
+                   headers={"Authorization": key})
+    credits = d.get("credits_left")
+    if isinstance(credits, bool) or not isinstance(credits, int) or credits < 0:
+        raise ValueError("Anymail Finder account returned an invalid credit balance")
+    return {"value": credits, "unit": "credits", "note": ""}
+
+
 async def _branddev(c, key):
     # No free account route exists — but a deliberate no-param call is a FREE validation error
     # (400, credits_consumed 0) whose body still carries key_metadata.credits_remaining.
@@ -904,6 +913,16 @@ async def _crustdata(c, key):
     return {"value": acct.get("credits"), "unit": "credits", "note": note}
 
 
+async def _theirstack(c, key):
+    d = await _get(c, "https://api.theirstack.com/v0/billing/credit-balance",
+                   headers={"Authorization": f"Bearer {key}"})
+    total = d.get("api_credits") if isinstance(d, dict) else None
+    used = d.get("used_api_credits") if isinstance(d, dict) else None
+    if type(total) is not int or total < 0 or type(used) is not int or used < 0:
+        raise ValueError("TheirStack returned no valid API credit balance")
+    return {"value": max(total - used, 0), "unit": "API credits", "note": "Available API credits"}
+
+
 async def _enrichlayer(c, key):
     d = await _get(c, "https://enrichlayer.com/api/v2/credit-balance",
                    headers={"Authorization": f"Bearer {key}"})
@@ -985,6 +1004,7 @@ async def _piapi(c, key):
 
 
 BALANCE_ROUTES = {
+    "theirstack": _theirstack,
     "anyapi": _anyapi,
     "cloro": _cloro,
     "openrouter": _openrouter,
@@ -1007,6 +1027,7 @@ BALANCE_ROUTES = {
     "branddev": _branddev,
     "companyenrich": _companyenrich,
     "findymail": _findymail,
+    "anymailfinder": _anymailfinder,
     "leadsforge": _leadsforge,
     "oceanio": _oceanio,
     "predictleads": _predictleads,

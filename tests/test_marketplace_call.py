@@ -909,6 +909,57 @@ def _mk(provider: str, **kw) -> call_resolution.MarketplaceCall:
     return call_resolution.MarketplaceCall(tool=None, upstream="", consumed=set(), provider=provider, **kw)
 
 
+@pytest.mark.parametrize(("endpoint", "body", "expected"), [
+    ("theirstack.jobs.search", b'{"data":[{},{}]}', 40_000),
+    ("theirstack.companies.search", b'{"data":[{}]}', 60_000),
+    ("theirstack.companies.search", b'{"data":[]}', 0),
+    ("theirstack.companies.technologies", b'{"data":[{},{}]}', 60_000),
+    ("theirstack.companies.buying_intents", b'{"data":[]}', 0),
+    ("theirstack.jobs.search", b'{"data":{}}', None),
+])
+def test_theirstack_settles_returned_records_or_one_company_lookup(endpoint, body, expected):
+    mk = _mk("theirstack", endpoint_id=endpoint, cost_type=(
+        "per_result" if endpoint.endswith("search") else "per_success"),
+        unit_micro=20_000, estimate_micro=(200_000 if endpoint.endswith("search") else 60_000))
+    assert call_settle._observed_cost_micro(mk, body) == expected
+
+
+@pytest.mark.parametrize(("endpoint", "body", "valid"), [
+    ("theirstack.jobs.search", {"limit": 2}, True),
+    ("theirstack.jobs.search", {}, False),
+    ("theirstack.companies.search", {"limit": 101}, False),
+    ("theirstack.jobs.search", {"limit": 1, "blur_company_data": True}, False),
+    ("theirstack.companies.technologies", {"company_domain": "stripe.com"}, True),
+    ("theirstack.companies.buying_intents", {"company_name_or": ["Stripe", "Google"]}, False),
+])
+def test_theirstack_platform_requests_bound_credits(endpoint, body, valid):
+    ep = {"id": endpoint, "provider": "theirstack"}
+    if valid:
+        call_resolution._enforce_platform_request(ep, json.dumps(body).encode())
+    else:
+        with pytest.raises(call_resolution.ResolutionFailed):
+            call_resolution._enforce_platform_request(ep, json.dumps(body).encode())
+
+
+def test_theirstack_platform_holds_match_the_credit_prices():
+    from treg.domain.catalog import store as catalog_store
+
+    catalog = catalog_store.load()
+    for endpoint, body, hold in (
+        ("theirstack.jobs.search", {"limit": 2, "posted_at_max_age_days": 30}, 40_000),
+        ("theirstack.companies.search", {"limit": 2, "company_domain_or": ["stripe.com"]}, 120_000),
+        ("theirstack.companies.technologies", {"company_domain": "stripe.com"}, 60_000),
+    ):
+        ep = catalog.by_id[endpoint]
+        assert catalog.platform_eligible(ep)
+        estimate, unit = call_resolution._marketplace_pricing(
+            "theirstack", endpoint, catalog.cost_view(ep["cost"], "theirstack"), {},
+            json.dumps(body).encode())
+        assert estimate == hold and unit > 0
+    assert not catalog.platform_eligible(catalog.by_id["theirstack.account.balance"])
+    assert not catalog.platform_eligible(catalog.by_id["theirstack.account.credits_consumption"])
+
+
 def test_litescrape_ai_overview_unserved_is_free():
     mk = _mk("litescrape", endpoint_id="litescrape.google.serp.ai_overview",
              cost_type="per_success", estimate_micro=150)
@@ -1920,6 +1971,50 @@ async def test_the_sweep_clears_labels_NOBODY_COMES_BACK_FOR(clients: AsyncClien
         gone = (await db.execute(select(IdempotentCall).where(
             IdempotentCall.key == "abandoned-label"))).scalar_one_or_none()
     assert gone is None, "an expired row nobody returns for must still be reclaimed"
+
+
+async def test_the_sweep_never_waits_on_a_concurrent_request_of_the_same_member(
+        clients: AsyncClient, platform_on):
+    """A member's concurrent batch must not queue on each other's expired rows.
+
+    Another request holds the lock on every expired label (it is mid-sweep). A new claim skips
+    those rows instead of waiting for that transaction, and the next claim reclaims them."""
+    import asyncio
+    from datetime import timedelta
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from sqlmodel import select
+
+    from treg.application.call.idempotency import _claim_idempotent
+    from treg.models import IdempotentCall, Membership
+
+    if session_maker.kw["bind"].dialect.name != "postgresql":
+        pytest.skip("requires an isolated PostgreSQL database via TREG_TEST_DB_URL")
+    org_id = (await clients.get("/orgs")).json()[0]["org_id"]
+    expired = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    async with session_maker() as db:
+        m = (await db.execute(select(Membership).where(
+            Membership.org_id == org_id).order_by(Membership.id))).scalars().first()
+        for n in range(3):
+            db.add(IdempotentCall(org_id=org_id, membership_id=m.id, key=f"old-{n}",
+                                  endpoint_id=EP, status="done", expires_at=expired))
+        await db.commit()
+    caller = SimpleNamespace(org_id=org_id, membership=m)
+
+    async with session_maker() as holder:
+        await holder.execute(select(IdempotentCall.id).where(
+            IdempotentCall.membership_id == m.id).with_for_update())
+        async with session_maker() as db, asyncio.timeout(5):
+            assert await _claim_idempotent("fresh-1", "fp", EP, caller, db, call_ref=uuid4().hex)
+        await holder.rollback()
+
+    async with session_maker() as db:
+        assert await _claim_idempotent("fresh-2", "fp", EP, caller, db, call_ref=uuid4().hex)
+    async with session_maker() as db:
+        keys = set((await db.execute(select(IdempotentCall.key).where(
+            IdempotentCall.membership_id == m.id))).scalars().all())
+    assert keys == {"fresh-1", "fresh-2"}
 
 
 async def _claim_row(key: str):

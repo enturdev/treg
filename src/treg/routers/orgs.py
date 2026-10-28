@@ -208,11 +208,18 @@ async def _count_owners(org_id: int, db: AsyncSession) -> int:
 
 async def _used_today_by_user(db: AsyncSession, org_id: int) -> dict[str, int]:
     """{user_email: events today} for every member of the org — one grouped COUNT per table, so the
-    members list gets everyone's usage without an N+1 fan-out. Spans all kinds (calls + local + server)."""
+    members list gets everyone's usage without an N+1 fan-out. Spans all kinds (calls + local + server).
+    Once the usage rollup has caught up, calls come from today's rollup rows plus the audit rows after
+    its cursor; until then from the audit table itself."""
     since = _day_start_utc()
     counts: dict[str, int] = {}
-    for email, n in (await db.execute(select(CallRecord.user_email, func.count()).where(
-            CallRecord.org_id == org_id, CallRecord.created_at >= since).group_by(CallRecord.user_email))).all():
+    state = await call_usage.cursor(db)
+    if state is not None and state.caught_up_at is not None:
+        calls = [(email, n) for _, email, _, _, _, n, _ in await call_usage.rows(db, org_id, since)]
+    else:
+        calls = (await db.execute(select(CallRecord.user_email, func.count()).where(
+            CallRecord.org_id == org_id, CallRecord.created_at >= since).group_by(CallRecord.user_email))).all()
+    for email, n in calls:
         counts[email] = counts.get(email, 0) + n
     for email, n in (await db.execute(select(RunRecord.user_email, func.count()).where(
             RunRecord.org_id == org_id, RunRecord.created_at >= since).group_by(RunRecord.user_email))).all():
@@ -1190,9 +1197,11 @@ async def list_agents(
     agent_emails = [u.email for u in users.values() if _is_agent_email(u.email)]
     # The roster shows lifetime identity history. The setup card polls the separate connection
     # endpoint for its newly issued key, so a rotation cannot inherit an old key's check-in.
+    # One EXISTS per agent: a DISTINCT over (org_id, user_email) reads every call each agent ever
+    # made, because Postgres before 18 cannot skip-scan to the next email.
     seen = set((await db.execute(
-        select(CallRecord.user_email).where(
-            CallRecord.org_id == org_id, CallRecord.user_email.in_(agent_emails)).distinct()
+        select(User.email).where(User.email.in_(agent_emails), select(CallRecord.id).where(
+            CallRecord.org_id == org_id, CallRecord.user_email == User.email).exists())
     )).scalars().all()) if agent_emails else set()
     out: list[dict] = []
     for m in memberships:

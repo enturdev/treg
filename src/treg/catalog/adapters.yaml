@@ -17,6 +17,12 @@
 
 adapters:
   # ---- people.email.find --------------------------------------------------------------------
+  anymailfinder.people.email.find:
+    accepts: [[full_name, domain], [first_name, last_name, domain], [linkedin_url]]
+    in: {full_name: body.full_name, first_name: body.first_name, last_name: body.last_name,
+         domain: body.domain, linkedin_url: body.linkedin_url}
+    out: {email: valid_email, verified: "email_status == 'valid'"}
+    miss: "valid_email == null"
   contactout.people.contact.work:
     accepts: [[linkedin_url]]
     in: {linkedin_url: queryParams.profile}
@@ -462,6 +468,11 @@ adapters:
                no_coverage: unknown, inconclusive: unknown, not_applicable: unknown}
 
   # ---- people.email.verify ------------------------------------------------------------------
+  anymailfinder.people.email.verify:
+    accepts: [[email]]
+    in: {email: body.email}
+    out: {valid: "email_status == 'valid'", status: email_status}
+    miss: "email_status == null"
   dropleads.people.email.verify:
     accepts: [[email]]
     in: {email: body.email}
@@ -1153,6 +1164,18 @@ adapters:
   # coresignal.companies.enrich: no example (402 at capture, empty account).
 
   # ---- companies.search (batch 5, 2026-08-28) --------------------------------------------------
+  theirstack.companies.search:
+    accepts: [[domain], [name]]
+    in: {domain: body.company_domain_or}
+    in_expr:
+      body.company_domain_or: "list(domain)"
+      body.company_name_or: "choose(domain, null, list(name))"
+      body.company_country_code_or: "list(upper(country))"
+      body.limit: limit
+    const: {body.page: 0}
+    max: {limit: 100}
+    out: {companies: data}
+    miss: "data == []"
   dropleads.companies.search:
     accepts: [[domain], [name], [industry], [technology]]
     in: {domain: body.filters.companyDomains, name: body.filters.companyNames,
@@ -1624,6 +1647,17 @@ adapters:
     out: {results: local_results}
     miss: "local_results == []"
 
+  theirstack.jobs.search:
+    accepts: [[domain], [name]]
+    in: {domain: body.company_domain_or}
+    in_expr:
+      body.company_domain_or: "list(domain)"
+      body.company_name_or: "choose(domain, null, list(name))"
+      body.limit: limit
+    const: {body.page: 0}
+    max: {limit: 100}
+    out: {jobs: data}
+    miss: "data == []"
   crustdata.companies.jobs.search:
     accepts: [[name]]
     in:  {name: body.filters.value}
@@ -3529,6 +3563,11 @@ adapters:
     out: {ads: results, page_id: "results[0].page_id", page_name: "results[0].page_name", count: "len(results)",
           next_cursor: continuation_token}
     miss: "coalesce(results, []) == []"
+  adyntel.google.ads.transparency:
+    accepts: [[company_domain]]
+    in: {company_domain: body.company_domain}
+    out: {ads: ads, count: "len(ads)", next_cursor: continuation_token}
+    miss: "coalesce(ads, []) == []"
   scrapecreators.x.v1-facebook-adlibrary-company-ads:
     accepts: [[page_id], [company_name]]
     in: {page_id: queryParams.pageId, company_name: queryParams.companyName}
