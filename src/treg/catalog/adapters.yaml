@@ -2754,12 +2754,10 @@ adapters:
     miss: "element.id == null"
   # Lead search is the only Harvest people search whose rows carry names and profile URLs:
   # profile-search hides out-of-network members (no name, no URL), so it stays unrouted.
-  # $0.10 buys a fixed page of 25 rows, so the router prices every request as 25 units.
   harvestapi.linkedin.leads.search:
     accepts: [[company_domain, title], [company_domain], [title]]
     in: {company_domain: queryParams.currentCompanies, title: queryParams.currentJobTitles}
     in_expr: {queryParams.locations: "coalesce(location, country_name(country))", queryParams.search: "csv(keywords)"}
-    cost_units: "25"
     out: {people: elements, count: pagination.totalElements}
     miss: "coalesce(elements, []) == []"
 
