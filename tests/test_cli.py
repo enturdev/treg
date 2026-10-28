@@ -940,7 +940,7 @@ def test_catalog_get_compares_a_capped_ranked_few(monkeypatch, capsys):
     cli.cmd_catalog(cli.build_parser().parse_args(["catalog", "get", "p0.job", "--limit", "4"]), {"base_url": "http://x"})
     out = _toon(capsys)
     assert [r["id"] for r in out["compare"]] == ["p0.job", "p3.job", "p2.job", "p4.job"]
-    assert out["compare_total"] == 16 and out["help"][0] == "treg catalog get p0.job --limit 100   # every provider of people.search"
+    assert out["compare_total"] == 16 and out["help"][0] == "treg catalog get people.search   # every provider of this job"
 
 
 def test_a_view_tables_only_several_narrow_rows_and_decodes_to_what_it_was_given():
@@ -1219,7 +1219,8 @@ def test_catalog_get_needs_an_id_and_404s_helpfully(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         cli.cmd_catalog(p.parse_args(["catalog", "get"]), {"base_url": "http://x"})
     capsys.readouterr()
-    _stub_catalog_client(monkeypatch, {"/catalog/endpoints/nope.x": _CatalogResp({}, status=404)})
+    _stub_catalog_client(monkeypatch, {"/catalog/endpoints/nope.x": _CatalogResp({}, status=404),
+                                       "/catalog/platforms/nope": _CatalogResp({}, status=404)})
     with pytest.raises(SystemExit):
         cli.cmd_catalog(p.parse_args(["catalog", "get", "nope.x"]), {"base_url": "http://x"})
     out = _toon(capsys)

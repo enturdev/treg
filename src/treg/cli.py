@@ -5951,13 +5951,16 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
         if r.status_code >= 400:
             sys.exit(1)
         return
+    if r.status_code == 404 and (job := _job_view(endpoint_id, cfg)):
+        _emit(*job)
+        return
     if r.status_code == 404:
         detail = _json_dict(r).get("detail")
         near = (detail.get("did_you_mean") or []) if isinstance(detail, dict) else []
         # The whole id minus its provider, as words: the last segment alone ("find" for
         # `apollo.people.email.find`) is a search term that matches half the catalog.
         terms = " ".join(endpoint_id.split(".")[1:] or [endpoint_id]).replace("-", " ").replace("_", " ").strip()
-        _fail("unknown_endpoint", f"no endpoint {endpoint_id!r} in the catalog",
+        _fail("unknown_endpoint", f"no endpoint or job {endpoint_id!r} in the catalog",
               [f"treg catalog get {near[0]}"] if near else [f"treg catalog search {terms}"],
               did_you_mean=near or None)
     if r.status_code != 200:
@@ -5996,8 +5999,8 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
         "added": e.get("added"),
     }
     help_lines = []
-    if view.get("compare_total") or view.get("also_total"):
-        help_lines.append(f"treg catalog get {e['id']} --limit 100   # every provider of {e.get('capability')}")
+    if (view.get("compare_total") or view.get("also_total")) and e.get("capability"):
+        help_lines.append(f"treg catalog get {e['capability']}   # every provider of this job")
     others = [row["id"] for row in view.get("compare") or [] if row["id"] != e["id"]]
     if others:
         help_lines.append(f"treg catalog get {others[0]}   # the same job from another provider")
@@ -6010,6 +6013,39 @@ def _requires(routing: dict | None) -> str | None:
     sets = ((routing or {}).get("contract") or {}).get("identity") or []
     names = [" + ".join(s) for s in sets if s]
     return None if not names else names[0] if len(names) == 1 else "one of " + " | ".join(names)
+
+
+def _job_view(job: str, cfg) -> tuple[dict, list[str]] | None:
+    """`catalog get <job>`: every provider of one job, ranked as `compare` ranks them, and the routed
+    id when treg can choose for the caller. None when no job has that id. An id that is both a job and
+    an endpoint (a one-provider job) is answered as the endpoint."""
+    with _client(cfg, auth=False) as c:
+        r = c.get(f"/catalog/platforms/{quote(job.split('.', 1)[0], safe='')}")
+        cap = next((x for x in (_json_dict(r).get("capabilities") or []) if x.get("id") == job), None) \
+            if r.status_code == 200 else None
+        if not cap or not cap.get("endpoints"):
+            return None
+        routed = next((x["id"] for x in cap["endpoints"] if x.get("kind") == "routed"), None)
+        d = c.get(f"/catalog/endpoints/{quote(routed or cap['endpoints'][0]['id'], safe='')}")
+    if d.status_code != 200:
+        return None
+    body = d.json()
+    members = [x for x in [body["endpoint"], *(body.get("siblings") or [])] if x.get("kind") != "routed"]
+    pinned = _pinned_provider(cfg, job)
+    ranked = sorted((x for x in members if not pinned or x["provider"] == pinned), key=_compare_rank)
+    rows = [{"id": x["id"], "price": _cost_usd(x.get("cost")), "works": _pct((x.get("observed") or {}).get("ok_rate")),
+             "calls": (x.get("observed") or {}).get("samples"), "hit": _pct((x.get("observed") or {}).get("hit_rate")),
+             "p50": _duration((x.get("observed") or {}).get("p50_ms")),
+             "last_ok_days": (x.get("observed") or {}).get("last_ok_days"), "verified": x.get("verified")}
+            for x in ranked]
+    view = {"job": job, "does": cap.get("description"), "providers": len(ranked),
+            "routed": f"{routed} lets treg pick the provider (own keys first, then cheapest per hit); price variable"
+            if routed else None,
+            "pinned": f"your team pins this job to {pinned}; other providers are refused" if pinned else None,
+            "compare_note": _METRICS_NOTE + "; last_ok_days is measured, verified is the catalog's hand-run stamp",
+            "compare": cli_view.table(rows, ("id", "price", "works", "calls", "hit", "p50", "last_ok_days", "verified"))}
+    help_lines = [f"treg catalog get {routed}   # the routed plan, in the order a call tries"] if routed else []
+    return view, help_lines + ["treg catalog get <id>   # params, price, a ready treg call line"]
 
 
 def _access_detail(endpoint_id: str, cfg) -> str | None:

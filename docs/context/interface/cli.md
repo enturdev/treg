@@ -540,7 +540,11 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   `compare_total` when there are more (`price`, `works` over `calls`, `hit`, `p50`, `last_ok_days` measured from the last real success, `verified` the
   catalog's hand-run stamp). Provider limits, pricing and docs come last. `search`/`get` are matched as
   positional **verbs** inside `cmd_catalog`, not argparse subcommands, so `treg catalog <platform>`
-  keeps working and a multi-word query needs no quoting. An id that misses is the `unknown_endpoint`
+  keeps working and a multi-word query needs no quoting. An id that is no endpoint but a job
+  (`treg catalog get people.search`, `_job_view`) lists every provider of that job, ranked as
+  `compare` ranks them, with its routed id when there is one; an id that is both (a one-provider
+  job) answers as the endpoint, and the endpoint detail's help points at its job when `compare` was
+  cut short. An id that is neither is the `unknown_endpoint`
   error with the server's `did_you_mean` ids and the command for the first one, or a search built from
   the id's words when nothing resembles it. `works` is a measured `0%` for an endpoint whose decided
   calls all failed and absent below the sample floor, because the floor publishes volume and never
