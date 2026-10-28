@@ -4,6 +4,7 @@ import pytest
 from sqlmodel import select
 
 from treg.application.call import route as call_route, service as call_service
+from treg.application.call.types import CallFailure
 from treg.domain.catalog import store as catalog_store
 from treg.domain.catalog.routing.contracts import Check
 from treg.infra import org_endpoint_quota
@@ -81,6 +82,35 @@ async def test_unavailable_quota_allows_the_primary_candidate_and_normal_charge(
     assert attempts["tomba.people.email.find"] == 1
     assert before - await _balance(clients) == TOMBA_FIND_PRICE
     assert await _settled_ids() == {response.headers["X-Treg-Call-Id"] + ":r0"}
+
+
+async def test_legacy_unavailable_child_failure_does_not_globally_refuse_route(
+    clients, monkeypatch, verifiers_on,
+):
+    execute = call_service.execute_call
+
+    async def child(context, upstream_client):
+        if context.input.raw_rest == "tomba.people.email.find":
+            raise CallFailure("org_endpoint_quota_unavailable", status_code=503,
+                              detail={"error": "org_endpoint_quota_unavailable"})
+        return await execute(context, upstream_client)
+
+    monkeypatch.setattr(call_service, "execute_call", child)
+    seen = []
+    hunter_hit = (200, {"data": {"email": "synthetic@example.com", "score": 99,
+                                "verification": {"status": "valid"}}})
+    monkeypatch.setattr(call_service, "relay", _relay({"hunter": [hunter_hit]}, seen))
+    before = await _balance(clients)
+    response = await clients.post(f"/call/{FIND}", json=ASK,
+                                  headers={"X-Treg-Route-Prefer": "tomba,hunter"})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["_treg"]["served_by"] == "hunter.people.email.find"
+    assert result["_treg"]["tried"][0]["charged_micro"] == 0
+    assert seen == ["hunter"]
+    charged = int(response.headers["X-Treg-Cost-Micro"])
+    assert charged > 0 and before - await _balance(clients) == charged
+    assert await _settled_ids() == {response.headers["X-Treg-Call-Id"] + ":r1"}
 
 
 @pytest.mark.parametrize("checker", [VERIFY, "tomba.people.email.verify"])

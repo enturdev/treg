@@ -47,6 +47,9 @@ before sending. Overflow checks its route, budget, child reservation and request
 Balance, daily/tag cap, resource and other pre-dispatch refusals consume no quota. A quota rejection
 releases any money hold and unused overflow budget; a successful Redis admission followed by
 cancellation or transport failure can still consume a unit without a completed provider request.
+Public-resource authorization may read provider metadata before quota admission. That lookup
+creates no Treg money hold or team charge; its provider-side price must be verified separately.
+The allowance gates the target's execution, not all preliminary provider I/O.
 
 Routed parents defer their allowance until a child can actually run or serve a cache hit. One Lua
 operation checks all unadmitted parent targets plus the child. Any confirmed exhausted rule rejects
@@ -71,9 +74,9 @@ whole route. When no target has a confirmed exhausted rule, Redis uncertainty al
 marks its targets admitted in the logical-call context, so a retry does not try to consume the same
 allowance again. A known quota refusal during
 optional verification is reported as `unchecked`, preserving the successful find and its normal
-charge. A hard `org_endpoint_quota_unavailable` failure, if raised by a child, still stops that
-waterfall; the optional verification wrapper preserves the find result. The normal Redis failure
-path does not raise that error. Existing deferred holds are released when the primary route refuses.
+charge. `org_endpoint_quota_unavailable` is not a global routed refusal; a legacy child raising it
+follows ordinary candidate-error fallback policy. The normal Redis failure path allows that child
+to run and does not raise that error. Existing deferred holds are released when the primary route refuses.
 Once an async submission has a task ID, poll errors retain the existing pending response and durable
 worker settlement ownership. Accepted calls are never refunded to the quota after upstream failure,
 cancellation or a lost Redis response.

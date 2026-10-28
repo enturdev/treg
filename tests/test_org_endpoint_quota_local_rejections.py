@@ -228,3 +228,35 @@ async def test_cancel_during_overflow_quota_refusal_cleanup_still_releases_budge
     await _assert_released(reserved=True)
     async with session_maker() as db:
         assert all(row.cost_micro == 0 for row in (await db.execute(select(OverflowSpend))).scalars())
+
+
+@pytest.mark.parametrize("answer,status,charged,closing_kind", [
+    (OK_ANSWER, 200, 3000, "settle"),
+    ((402, {"success": False, "error": "insufficient balance"}), 503, 0, "release"),
+    ((400, {"success": False, "error": "x", "_orthogonal": {
+        "error": "orthogonal_endpoint_contract", "message": "missing"}}), 503, 0, "release"),
+], ids=["served", "aggregator-refused", "contract-refused"])
+async def test_completed_overflow_does_not_reenter_quota_refusal_cleanup(
+    clients, monkeypatch, overflow_on, answer, status, charged, closing_kind,
+):
+    await _route(price_micro=3000)
+    await _exhausted()
+    attempts, used = _enable(monkeypatch, {EP: 1})
+    settle = AsyncMock(wraps=O._platform_settle)
+    monkeypatch.setattr(O, "_platform_settle", settle)
+    monkeypatch.setattr(O, "_send", _orthogonal([answer], []))
+    before = await _balance(clients)
+
+    response = await clients.get(f"/call/{EP}?aweme_id=7")
+
+    assert response.status_code == status, response.text
+    assert before - await _balance(clients) == charged
+    assert attempts == used == {EP: 1}
+    settle.assert_awaited_once()
+    assert settle.await_args.kwargs.get("reason") != "overflow_admission_refused"
+    assert settle.await_args.args[0].call_id is None
+    async with session_maker() as db:
+        assert (await db.execute(select(Hold))).scalars().all() == []
+        entries = (await db.execute(select(LedgerEntry).where(
+            LedgerEntry.kind.in_(["reserve", "release", "settle"])))).scalars().all()
+    assert sorted(entry.kind for entry in entries) == sorted(["reserve", closing_kind])
