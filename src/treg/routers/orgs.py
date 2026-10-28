@@ -17,6 +17,7 @@ from .. import oauth_providers
 from .. import providers as _providers
 from ..application import call_usage, key_spend
 from ..application import enterprise_sso
+from ..application import home as home_app
 from ..application import images
 from ..application.onboard import demo as demo_seed
 from ..application import archive_erasure
@@ -449,6 +450,15 @@ app = APIRouter()
 org_entry_router = app
 
 
+async def _visible_orgs(user_id: int, x_treg_token: str, x_treg_org: str, treg_session: str,
+                        db: AsyncSession) -> list[dict]:
+    """The caller's memberships, narrowed to its one team when it signed in through that team's SSO."""
+    orgs = await teams.list_user_orgs(user_id=user_id, x_treg_token=x_treg_token, x_treg_org=x_treg_org, db=db)
+    sso_org_id = ((identity_session.read_identity_claims(x_treg_token) or {}).get("sso_org_id")
+                  if x_treg_token else (identity_session.read_session_claims(treg_session) or {}).get("sso_org_id"))
+    return orgs if sso_org_id is None else [org for org in orgs if org["org_id"] == sso_org_id]
+
+
 @app.get("/orgs")
 async def list_orgs(
     user: User = Depends(require_identity),
@@ -457,19 +467,23 @@ async def list_orgs(
     treg_session: str = Cookie(default=""),
     db: AsyncSession = Depends(get_session),
 ) -> list[dict]:
-    orgs = await teams.list_user_orgs(
-        user_id=user.id,
-        x_treg_token=x_treg_token,
-        x_treg_org=x_treg_org,
-        db=db,
-    )
-    sso_org_id = ((identity_session.read_identity_claims(x_treg_token) or {}).get("sso_org_id")
-                  if x_treg_token else (identity_session.read_session_claims(treg_session) or {}).get("sso_org_id"))
-    if sso_org_id is not None:
-        orgs = [org for org in orgs if org["org_id"] == sso_org_id]
+    orgs = await _visible_orgs(user.id, x_treg_token, x_treg_org, treg_session, db)
     for o in orgs:  # the team's picture as a URL (None = initials); the key stays internal
         o["avatar_url"] = images.public_url(o.pop("avatar_key", None))
     return orgs
+
+
+@app.get("/home")
+async def home(
+    caller: Caller = Depends(require_member),
+    x_treg_token: str = Header(default=""),
+    x_treg_org: str = Header(default=""),
+    treg_session: str = Cookie(default=""),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    """Bare `treg` in one round trip."""
+    count = len(await _visible_orgs(caller.user.id, x_treg_token, x_treg_org, treg_session, db))
+    return await home_app.summary(db, caller, teams=count)
 
 
 app = APIRouter()

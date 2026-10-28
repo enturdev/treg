@@ -37,6 +37,7 @@ import threading
 import time
 import webbrowser
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import NoReturn
 from urllib.parse import parse_qsl, quote, urlsplit
@@ -4405,8 +4406,9 @@ def cmd_version(args, cfg) -> None:
     print(f"treg {cli_version()}")
 
 
-_HOME_DESCRIPTION = ("the tool catalog for your agent plus your team's own tools, on one token; "
-                     "credentials are injected on the server, never held here")
+def _home_description(catalog_tools: str | None = None) -> str:
+    """The slogan, with the catalog's size from the registry (`/home`), or a floor an older one keeps true."""
+    return f"The tool catalog for your agent. Search and call {(catalog_tools or '4000+').replace(',', '')} tools"
 
 
 def _quietly(read):
@@ -4428,10 +4430,27 @@ def _home_state(cfg: dict) -> dict:
     if not (os.environ.get("TREG_TOKEN") or cfg.get("token")):
         state["account"] = None
         return state
-    with _client(cfg) as c:
+    with _client(cfg) as c, ThreadPoolExecutor(max_workers=3) as pool:
         c.timeout = httpx.Timeout(5.0)  # an orientation glance of up to four reads, not a relayed call
         try:
-            me = c.get("/auth/me")
+            home = c.get("/home")
+        except httpx.HTTPError as exc:
+            state["unavailable"] = f"{type(exc).__name__} reaching the registry"
+            return state
+        body = _json_dict(home) if home.status_code == 200 else {}
+        if body.get("email") and body.get("org"):
+            return state | {"account": body["email"], "teams": body.get("teams"), "team": body["org"],
+                            "role": body.get("role"), "catalog_tools": body.get("catalog_tools"),
+                            **({"balance_micro": body["balance_micro"]} if isinstance(body.get("balance_micro"), int) else {}),
+                            **({"own_tools": body["own_tools"]} if isinstance(body.get("own_tools"), list) else {})}
+        # An older registry has no /home, and no active team or a stale one is refused there: the
+        # separate reads below name what is missing.
+        # Only the balance waits on another read (it needs the team id); the rest go out together.
+        me_f = pool.submit(c.get, "/auth/me")
+        rows_f = pool.submit(_quietly, lambda: _org_rows(c))
+        tools_f = pool.submit(_quietly, lambda: c.get("/tools"))
+        try:
+            me = me_f.result()
         except httpx.HTTPError as exc:
             state["unavailable"] = f"{type(exc).__name__} reaching the registry"
             return state
@@ -4446,7 +4465,7 @@ def _home_state(cfg: dict) -> dict:
             state["unavailable"] = f"HTTP {me.status_code} from /auth/me is not a treg answer"
             return state
         state["account"] = body.get("email")
-        rows = _quietly(lambda: _org_rows(c))
+        rows = rows_f.result()
         if rows is None:  # an agent key: /auth/me names its one team
             org = {"org_id": body["org_id"], "slug": body.get("org"), "role": body.get("role")} \
                 if body.get("org_id") else None
@@ -4460,7 +4479,7 @@ def _home_state(cfg: dict) -> dict:
         micro = _json_dict(b).get("balance_micro") if b is not None and b.status_code == 200 else None
         if isinstance(micro, int):
             state["balance_micro"] = micro
-        t = _quietly(lambda: c.get("/tools"))
+        t = tools_f.result()
         if t is not None and t.status_code == 200:
             state["own_tools"] = [x["name"] for x in _as_list(t) if isinstance(x, dict) and x.get("name")]
     return state
@@ -4484,7 +4503,7 @@ def _home_help(state: dict) -> list[str]:
     out += ["treg catalog search \"<task>\"   # find a tool for a job, with prices",
             "treg catalog get <id>   # params, price, a ready treg call line"]
     if state.get("own_tools"):
-        out.append("treg call <tool>/<path>   # one of your own tools; treg tool ls lists them")
+        out.append("treg call <tool>/<path>   # an own_tools entry; <path> is the upstream API's own")
     out.append("treg --help   # every command")
     return out
 
@@ -4496,15 +4515,22 @@ def cmd_home(args, cfg) -> None:
     home = str(Path.home())
     exe = "~" + exe[len(home):] if exe.startswith(home + os.sep) else exe
     help_lines = _home_help(state)
-    view = {"bin": exe, "version": cli_version(), "description": _HOME_DESCRIPTION, **state}
-    if not _JSON_OVERRIDE:
-        if "balance_micro" in view:
-            view["balance"] = _usd(view.pop("balance_micro"))
-        if "account" in view and view["account"] is None:
-            view["account"] = "not signed in"
-        if "team" in view and view["team"] is None:
-            view["team"] = "none"
-    _emit(view, help_lines)
+    if _JSON_OVERRIDE:
+        _emit({"bin": exe, "version": cli_version(), "description": _home_description(state.get("catalog_tools")),
+               **state}, help_lines)
+        return
+    team = state.get("team")
+    if team and state.get("role"):
+        team += f" ({state['role']}" + (f"; 1 of {state['teams']} teams)" if (state.get("teams") or 0) > 1 else ")")
+    custom = state["registry"].rstrip("/") != PRODUCTION_BASE_URL
+    problem = state.get("unavailable") or state.get("registry_error")
+    _emit({"treg": f"{cli_version()} at {exe}", "about": _home_description(state.get("catalog_tools")),
+           "registry": f"{state['registry']} ({problem})" if problem else state["registry"] if custom else None,
+           "account": None if problem else (state.get("account") or "not signed in")
+           + (f" ({state['account_error']})" if state.get("account_error") else ""),
+           "team": (team or "none") if state.get("account") else None,
+           "balance": _usd(state["balance_micro"]) if "balance_micro" in state else None,
+           "own_tools": state.get("own_tools")}, help_lines)
 
 
 def cmd_update(args, cfg) -> None:

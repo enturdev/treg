@@ -4,6 +4,7 @@ status: shipped
 sources:
   - src/treg/cli.py
   - src/treg/cli_view.py
+  - src/treg/application/home.py
   - tests/test_released_cli_compat.py
   - tests/test_cli_key_compatibility.py
   - src/treg/routers/auth_helpers.py
@@ -60,16 +61,20 @@ retain the existing `_show` formatting on stdout, including pretty-printed JSON.
 Nearly every caller is an agent, so `treg` with no arguments answers with live state instead of a
 usage error that costs it a turn on `--help`. The top-level subparsers are not required and the
 parser's default `fn` is `cmd_home`, so `--org` and `--json` apply as everywhere else. `_home_state`
-reads `/auth/me` for the account, then resolves the team the way `balance` and `whoami` do: `/orgs`
-(`_org_rows`, picked by `_pick_org`: the effective org, else the active one), falling back to the
-team `/auth/me` names when `/orgs` refuses an agent key. `_active_org` (and `_active_org_id` on top
-of it) is that same order for every other command. Then `/orgs/{id}/balance?limit=1` and `/tools`,
-each under a short timeout. Each read stands alone (`_quietly`): one that fails or answers in an
-unexpected shape leaves out its own line, and the command always exits 0. The view (`bin`,
-`version`, `description`, `registry`, `account`, `team`, `role`, `balance`, `own_tools`) ends in
-`help`, runnable next commands with runtime values as `<placeholders>` (`_home_help`). A blocker
-leads the help: no treg registry at that URL (`treg config`), a registry 5xx (run `treg` again), not
-signed in, a stale active team (`treg org use`), no team at all, or an empty balance (`treg topup`).
+reads it all in one round trip from `GET /home` (`application/home.py`: account, active team, role,
+team count, balance, own tool names, and the catalog's size for the slogan). An older registry has no
+`/home`, and one with no active team or a stale one refuses it; then `/auth/me`, `/orgs` and `/tools`
+go out together and the balance follows once the team is known. The team resolves the way `balance`
+and `whoami` do: `/orgs` (`_org_rows`, picked by `_pick_org`: the effective org, else the active
+one), falling back to the team `/auth/me` names when `/orgs` refuses an agent key. `_active_org`
+(and `_active_org_id` on top of it) is that same order for every other command. Each read stands
+alone (`_quietly`): one that fails or answers in an unexpected shape leaves out its own line, and the
+command always exits 0. The view leads with state (`treg` version and path, `about`, `account`,
+`team` with its role and team count, `balance`), then `own_tools`, and ends in `help`, runnable next
+commands with runtime values as `<placeholders>` (`_home_help`). `registry` shows only when it is
+not treg.to or cannot be reached. A blocker leads the help: no treg registry at that URL (`treg
+config`), a registry 5xx (run `treg` again), not signed in, a stale active team (`treg org use`), no
+team at all, or an empty balance (`treg topup`).
 `--json` prints the same state as one object with `balance_micro` and a `help` list.
 
 ## Output for agents: TOON views

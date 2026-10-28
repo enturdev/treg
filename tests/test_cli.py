@@ -1117,7 +1117,7 @@ def test_bare_treg_shows_live_state_and_next_commands(monkeypatch, capsys):
                           tools=("stripe", "gh"))
     _home({"token": "t", "active_org": "acme"})
     out = _toon(capsys)
-    assert out["account"] == "a@example.com" and (out["team"], out["role"]) == ("acme", "admin")
+    assert out["account"] == "a@example.com" and out["team"] == "acme (admin; 1 of 2 teams)"
     assert out["balance"] == "$1.00" and out["own_tools"] == ["stripe", "gh"]
     assert "/orgs/7/balance" in seen, "the active team's balance, not the first membership's"
     assert any(h.startswith("treg call <tool>/<path>") for h in out["help"])
@@ -1130,7 +1130,7 @@ def test_bare_treg_with_a_team_key_takes_its_team_from_auth_me(monkeypatch, caps
                                            "role": "member"}, balance_micro=0)
     _home({"token": "t"})
     out = _toon(capsys)
-    assert "/orgs/7/balance" in seen and (out["team"], out["role"]) == ("acme", "member")
+    assert "/orgs/7/balance" in seen and out["team"] == "acme (member)"
     assert out["own_tools"] == []
     assert out["help"][0].startswith("treg topup"), "the blocker leads"
 
@@ -1152,7 +1152,7 @@ def test_bare_treg_survives_an_unreachable_registry(monkeypatch, capsys):
     _home_registry(monkeypatch, fail={"/auth/me": httpx.ConnectError("refused")})
     _home({"token": "t"})
     out = _toon(capsys)
-    assert out["unavailable"] == "ConnectError reaching the registry" and "account" not in out
+    assert out["registry"].endswith("(ConnectError reaching the registry)") and "account" not in out
     assert out["help"][0].startswith("treg config")
 
 
@@ -1166,7 +1166,7 @@ def test_bare_treg_tells_a_wrong_registry_from_a_failing_one(monkeypatch, capsys
     _home_registry(monkeypatch, me=me)
     _home({"token": "t"})
     out = _toon(capsys)
-    assert key in out and "account" not in out
+    assert out["registry"].endswith(")") and "account" not in out
     assert out["help"][0].startswith(first_help)
 
 
@@ -1176,7 +1176,7 @@ def test_bare_treg_leaves_out_only_the_line_that_failed(monkeypatch, capsys):
                    balance=httpx.Response(200, json=[1, 2]), fail={"/tools": httpx.ReadTimeout("slow")})
     _home({"token": "t"})
     out = _toon(capsys)
-    assert out["account"] == "a@example.com" and (out["team"], out["role"]) == ("acme", "owner")
+    assert out["account"] == "a@example.com" and out["team"] == "acme (owner)"
     assert "balance" not in out and "own_tools" not in out and out["registry"] == "https://registry.example.test"
 
 
@@ -1188,7 +1188,7 @@ def test_bare_treg_resolves_the_team_like_balance_does(monkeypatch, capsys):
                                 {"org_id": 7, "slug": "chosen", "role": "member"}])
     _home({"token": "t", "active_org": "chosen"})
     out = _toon(capsys)
-    assert (out["team"], out["role"]) == ("chosen", "member") and "/orgs/7/balance" in seen
+    assert out["team"] == "chosen (member; 1 of 2 teams)" and "/orgs/7/balance" in seen
 
 
 def test_bare_treg_with_teams_but_none_active_points_at_org_use(monkeypatch, capsys):
@@ -1211,7 +1211,7 @@ def test_bare_treg_json_and_dispatch(monkeypatch, capsys):
     body = json.loads(capsys.readouterr().out)
     assert body["team"] == "acme" and body["balance_micro"] == 1_000_000 and body["help"]
     cli.main([])
-    assert capsys.readouterr().out.startswith("bin: ")
+    assert capsys.readouterr().out.startswith("treg: ")
 
 
 def test_catalog_get_needs_an_id_and_404s_helpfully(monkeypatch, capsys):
