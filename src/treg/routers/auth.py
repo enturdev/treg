@@ -458,25 +458,21 @@ async def login_page(request: Request, cli: str = "", ad: str = "", treg_session
     click ("Continue as …"), else offers every configured door — GitHub, Google, email one-time code.
     The email door is always present, so login works even with no OAuth app configured.
 
-    `ad` is the short install link's code (`signup.mint_ad_link`): the CLI sends it so the ad click
-    the landing page saw is restored as the `treg_ad` cookie HERE, in whichever browser opened this
-    page — an agent's embedded browser never held the landing page's cookie. Same shape and lifetime
-    as `adtrack.js` writes, and readable by it, so every downstream step (carry, stash, signup) is
-    unchanged. Unknown codes restore nothing."""
-    restored = await signup.ad_cookie_for_link(ad)
+    `ad` is the short install link's code (`architecture/ads-conversions.md`, "Capture")."""
+    if cli and not _LOGIN_ID_RE.fullmatch(cli):
+        return _auth_page("Login failed", "Bad login link. Run <code>treg login</code> again.", ok=False, status=400)
+    restored, max_age = await signup.redeem_ad_link(ad)
     if not cli:
         resp = RedirectResponse("/app" + ("?" + request.url.query if request.url.query else ""),
                                 status_code=302)  # preserve incoming attribution for the SPA
-    elif not _LOGIN_ID_RE.fullmatch(cli):
-        return _auth_page("Login failed", "Bad login link. Run <code>treg login</code> again.", ok=False, status=400)
     else:
         s = get_settings()
         session_email = await auth_use_cases.cli_session_email(treg_session)
         resp = HTMLResponse(_login_page_html(
             cli, session_email=session_email,
             github=bool(s.github_client_id), google=bool(s.google_client_id)))
-    if restored:
-        resp.set_cookie("treg_ad", restored, max_age=90 * 24 * 3600, path="/", samesite="lax",
+    if restored and not request.cookies.get("treg_ad"):
+        resp.set_cookie("treg_ad", restored, max_age=max_age, path="/", samesite="lax",
                         secure=_is_https(request), httponly=False)
     return resp
 

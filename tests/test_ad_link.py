@@ -35,7 +35,9 @@ async def test_short_link_carries_the_click_into_a_cookieless_login(clients: Asy
     assert page.status_code == 200
     set_cookie = page.headers.get("set-cookie", "")
     assert f"treg_ad={COOKIE}" in set_cookie
-    assert "Max-Age=7776000" in set_cookie and "SameSite=lax" in set_cookie and "Path=/" in set_cookie
+    max_age = int(set_cookie.split("Max-Age=")[1].split(";")[0])
+    assert 7776000 - 60 <= max_age <= 7776000  # 90 days from the mint, not renewed
+    assert "SameSite=lax" in set_cookie and "Path=/" in set_cookie
     assert "HttpOnly" not in set_cookie  # adtrack.js must still be able to read and carry it
 
     # The restored cookie reaches the signup door exactly like a first-party capture would.
@@ -80,3 +82,45 @@ async def test_minting_is_rate_limited_per_address(clients: AsyncClient, ads_ena
     statuses = [(await clients.post("/i")).status_code for _ in range(31)]
     assert statuses[:30] == [200] * 30
     assert statuses[30] == 429
+
+
+async def test_a_code_redeems_once(clients: AsyncClient, ads_enabled):
+    clients.cookies.set("treg_ad", COOKIE)
+    code = (await clients.post("/i")).json()["code"]
+    clients.cookies.clear()
+    first = await clients.get(f"/login?cli={LOGIN_ID}&ad={code}")
+    assert f"treg_ad={COOKIE}" in first.headers.get("set-cookie", "")
+    clients.cookies.clear()  # a stranger running the same pasted command
+    second = await clients.get(f"/login?cli={LOGIN_ID}&ad={code}")
+    assert second.status_code == 200
+    assert "treg_ad=" not in second.headers.get("set-cookie", "")
+
+
+async def test_a_browser_keeps_its_own_click(clients: AsyncClient, ads_enabled):
+    clients.cookies.set("treg_ad", COOKIE)
+    code = (await clients.post("/i")).json()["code"]
+    clients.cookies.set("treg_ad", "gclid%7CNEWER_CLICK%7Chome")
+    page = await clients.get(f"/login?cli={LOGIN_ID}&ad={code}")
+    assert page.status_code == 200
+    assert "treg_ad=" not in page.headers.get("set-cookie", "")
+
+
+async def test_restored_cookie_expires_with_the_mint(clients: AsyncClient, ads_enabled, monkeypatch):
+    import time as _time
+    clients.cookies.set("treg_ad", COOKIE)
+    code = (await clients.post("/i")).json()["code"]
+    clients.cookies.clear()
+    real = _time.time
+    monkeypatch.setattr(_time, "time", lambda: real() + 29 * 86400)  # redeemed 29 days later
+    set_cookie = (await clients.get(f"/login?cli={LOGIN_ID}&ad={code}")).headers.get("set-cookie", "")
+    max_age = int(set_cookie.split("Max-Age=")[1].split(";")[0])
+    assert 61 * 86400 - 60 <= max_age <= 61 * 86400
+
+
+async def test_a_bad_login_link_does_not_spend_the_code(clients: AsyncClient, ads_enabled):
+    clients.cookies.set("treg_ad", COOKIE)
+    code = (await clients.post("/i")).json()["code"]
+    clients.cookies.clear()
+    assert (await clients.get(f"/login?cli=bad&ad={code}")).status_code == 400
+    page = await clients.get(f"/login?cli={LOGIN_ID}&ad={code}")
+    assert f"treg_ad={COOKIE}" in page.headers.get("set-cookie", "")

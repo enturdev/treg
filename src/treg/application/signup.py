@@ -3,6 +3,7 @@
 import logging
 import re
 import secrets
+import time
 from datetime import timedelta
 from urllib.parse import quote, unquote
 
@@ -245,19 +246,26 @@ async def mint_ad_link(raw_cookie: str, *, address: str) -> str | None:
             raise SignupError("too_many_links")
         await ratestore.sweep(db, AD_LINK_NS)
         await ratestore.kv_put(db, AD_LINK_NS, crypto.hash_token(code),
-                               {"cookie": quote(f"{kind}|{click_id}|{landing}", safe="")},
+                               {"cookie": quote(f"{kind}|{click_id}|{landing}", safe=""),
+                                "minted_at": time.time()},
                                ttl_s=AD_LINK_TTL.total_seconds())
         await db.commit()
     return code
 
 
-async def ad_cookie_for_link(code: str) -> str:
-    """The cookie value a code stands for, or "" for an unknown, expired or malformed code."""
+async def redeem_ad_link(code: str) -> tuple[str, int]:
+    """(cookie value, seconds it may still live) for a code, or ("", 0) for an unknown, expired,
+    already redeemed or malformed code. A code redeems once."""
     if not code or not AD_LINK_RE.fullmatch(code) or not adsconv.enabled():
-        return ""
+        return "", 0
     async with session_maker() as db:
-        row = await ratestore.kv_get(db, AD_LINK_NS, crypto.hash_token(code))
-    return str((row or {}).get("cookie") or "")
+        row = await ratestore.kv_take(db, AD_LINK_NS, crypto.hash_token(code))
+        await db.commit()
+    cookie = str((row or {}).get("cookie") or "")
+    max_age = int(float((row or {}).get("minted_at") or 0) + AD_CLICK_STASH_TTL.total_seconds() - time.time())
+    if not cookie or max_age <= 0:
+        return "", 0
+    return cookie, max_age
 
 
 async def stash_ad_click(email: str, raw_cookie: str) -> None:
