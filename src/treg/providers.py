@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 # `auth` is the provider's DEFAULT shape; a per-variable form (CLIENT_ID/SECRET → oauth2) can override
 # it. Served at GET /providers.json so the CLI can refresh centrally (bundled copy = offline fallback);
 # bump CATALOG_VERSION whenever entries change so a cache can tell it's stale.
-CATALOG_VERSION = 25
+CATALOG_VERSION = 26  # v26: MobiusEngine Jobs Data key detection
 # `skills` (optional) matches a SKILL FOLDER name for file-credential skills that have no env var to
 # key on (OAuth token files etc.) — see `match_skill`. Such providers carry `tokens: []` so the env
 # scanner never mis-detects them as a simple bearer key (their real auth is OAuth + extra headers).
@@ -135,6 +135,8 @@ CATALOG: list[dict] = [
     {"provider": "ScrapeCreators", "tokens": ["SCRAPECREATORS"],   "base_url": "https://api.scrapecreators.com",                  "auth": {"shape": "api_key_header", "header": "x-api-key"}},
     {"provider": "Fetchin", "tokens": ["FETCHINIO"], "base_url": "https://api.fetchin.io",
      "auth": {"shape": "api_key_header", "header": "X-API-Key"}, "probe": "api/v1/subscription"},
+    {"provider": "OrbiSearch", "tokens": ["ORBISEARCH"], "base_url": "https://api.orbisearch.com",
+     "auth": {"shape": "api_key_header", "header": "X-API-Key"}, "probe": "v1/credits"},
     {"provider": "Sumble", "tokens": ["SUMBLE"], "base_url": "https://api.sumble.com/v9",
      "auth": {"shape": "bearer"}},
     {"provider": "MoltSets", "tokens": ["MOLTSETS"],
@@ -186,6 +188,7 @@ CATALOG: list[dict] = [
     {"provider": "Keenable",    "tokens": ["KEENABLE"],            "base_url": "https://api.keenable.ai",                         "auth": {"shape": "api_key_header", "header": "X-API-Key"}},
     {"provider": "Sixtyfour AI", "tokens": ["SIXTYFOUR"],           "base_url": "https://api.sixtyfour.ai",                       "auth": {"shape": "api_key_header", "header": "x-api-key"}, "probe": "check-balance"},
     {"provider": "BlitzAPI",     "tokens": ["BLITZAPI", "BLITZ_API"], "base_url": "https://api.blitz-api.ai",                    "auth": {"shape": "api_key_header", "header": "x-api-key"}, "probe": "v2/account/key-info"},
+    {"provider": "MobiusEngine Jobs Data", "tokens": ["MOBIUSENGINE_JOBS"], "base_url": "https://jobs-api.arihaan.ai", "auth": {"shape": "api_key_header", "header": "x-api-key"}, "probe": "v1/balance"},
     {"provider": "Olostep",     "tokens": ["OLOSTEP"],             "base_url": "https://api.olostep.com",                         "auth": {"shape": "bearer"}, "probe": "user/credits/info"},
     {"provider": "ScrapeGraphAI", "tokens": ["SCRAPEGRAPHAI", "SGAI"],
      "base_url": "https://v2-api.scrapegraphai.com",

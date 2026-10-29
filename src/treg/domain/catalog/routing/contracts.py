@@ -66,6 +66,9 @@ class Contract:
     verdict_map: dict[str, str] = field(default_factory=dict)
     # The check a caller may ask for with `X-Treg-Route-Verify`; None = the header is refused.
     check: Check | None = None
+    # The output field two providers must agree on under `X-Treg-Route-Confirm`: a hit counts only
+    # once another provider returns the same value. Empty = the header is refused.
+    confirm: str = ""
     # True where a 2xx with nothing in it is the provider failing the job, not "no result": an
     # empty scraped page, an empty results list. Measured success then counts such an answer
     # against the endpoint (`stats.Tally.fold`), so a provider that answers 200 to everything
@@ -223,6 +226,7 @@ def parse_contracts(doc: dict) -> dict[str, Contract]:
             scoping=tuple(str(k) for k in scoping),
             prefer=tuple(str(p).lower() for p in c.get("prefer") or ()),
             check=_parse_check(cap, c.get("check"), c.get("output") or {}),
+            confirm=_parse_confirm(cap, c.get("confirm"), c.get("output") or {}),
             empty_is_failure=bool(c.get("empty_is_failure", False)),
             one_subject=bool(c.get("one_subject", False)),
             **_parse_verdict(cap, c.get("verdict")))
@@ -242,6 +246,14 @@ def _parse_check(cap: str, raw, output: dict) -> Check | None:
                  prefer=tuple(str(p).lower() for p in raw.get("prefer") or ()),
                  when=str(raw.get("when") or ""), skip_reason=str(raw.get("skip_reason") or ""),
                  skip_advice=str(raw.get("skip_advice") or ""))
+
+
+def _parse_confirm(cap: str, raw, output: dict) -> str:
+    if not raw:
+        return ""
+    if raw not in output:
+        raise ValueError(f"contract {cap}: confirm must name a field of its output, got {raw!r}")
+    return str(raw)
 
 
 def _parse_verdict(cap: str, raw) -> dict:

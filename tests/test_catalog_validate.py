@@ -82,7 +82,29 @@ def test_cost_modifiers_accept_only_supported_declarative_credit_rules():
 
     bad_settle: list[str] = []
     validator.check_cost(base | {"settle": "estimate"}, "catalog:test", bad_settle, [])
-    assert any("cost.settle currently supports only 'base', 'modifiers', 'usage' or 'quantity'" in error for error in bad_settle)
+    assert any("cost.settle currently supports only" in error for error in bad_settle)
+
+
+def test_terminal_presence_cost_requires_a_bounded_async_result_rule():
+    base = {
+        "type": "per_success", "value": 1, "currency": "credit", "per": 1,
+        "unit": "call", "source": "docs", "source_url": "https://example.com/pricing",
+        "checked": "2026-10-27", "confidence": "documented",
+        "settle": "terminal_presence", "presence": {"row": "data.0", "field": "email"},
+    }
+    errors: list[str] = []
+    validator.check_cost(base, "catalog:test", errors, [])
+    assert errors == []
+
+    invalid: list[str] = []
+    validator.check_cost(base | {"presence": {"row": "data..0", "field": "email"}},
+                         "catalog:test", invalid, [])
+    assert any("presence.field JSON path" in error for error in invalid)
+
+    root_errors: list[str] = []
+    validator.check_cost(base | {"presence": {"field": "number"}},
+                         "catalog:test", root_errors, [])
+    assert root_errors == []
 
 
 def test_status_marker_references_must_exist_and_end_at_a_live_endpoint():
@@ -585,7 +607,7 @@ def test_flat_price_usage_settlement_is_accepted():
     (lambda c: c.update(usage={"path": "usage.cost", "unit": "tokens"}),
      "needs a numeric fx.yaml unit_rates_usd entry"),
     (lambda c: c.update(settle="base"), "usage is only valid with settle: usage"),
-    (lambda c: c.update(settle="later"), "supports only 'base', 'modifiers', 'usage' or 'quantity'"),
+    (lambda c: c.update(settle="later"), "supports only 'base', 'modifiers', 'usage', 'quantity' or 'terminal_presence'"),
 ])
 def test_flat_price_usage_settlement_rejects_bad_shapes(mutate, message):
     cost = _flat_usage_cost()
@@ -876,6 +898,26 @@ def test_strict_query_contract_validation(patch, valid):
     errors = []
     validator.check_strict_query(ep | patch, 'example', errors)
     assert bool(errors) is not valid
+
+
+def test_strict_query_accepts_a_declared_path_parameter():
+    ep = {'strict_query': True, 'method': 'GET', 'path': '/jobs/{id}',
+          'input': {'pathParams': {'id': {'type': 'string', 'required': True}}}}
+    errors = []
+    validator.check_strict_query(ep, 'example', errors)
+    assert not errors
+
+
+def test_body_allowlist_object_item_presence_rules():
+    ep = {'body_allowlist': True, 'method': 'POST',
+          'input': {'body': {'data': {'type': 'array[object]',
+                                      'item_required_any': ['email', 'linkedin']}}}}
+    errors = []
+    validator.check_body_allowlist(ep, 'example', errors)
+    assert not errors
+    ep['input']['body']['data']['item_required_any'] = []
+    validator.check_body_allowlist(ep, 'example', errors)
+    assert any('item_required_any' in error for error in errors)
 
 
 @pytest.mark.parametrize('patch,valid', [

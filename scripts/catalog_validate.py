@@ -241,13 +241,19 @@ def check_strict_query(ep: dict, where: str, errors: list[str]) -> None:
         fail(errors, where, "strict_query must be a boolean")
     if ep["strict_query"] is not True:
         return
-    fields = (ep.get("input") or {}).get("queryParams")
-    if ep.get("method") != "GET" or not isinstance(fields, dict) or not fields:
-        fail(errors, where, "strict_query requires a GET with declared queryParams")
+    inp = ep.get("input") or {}
+    fields = inp.get("queryParams") or {}
+    path_fields = inp.get("pathParams") or {}
+    if ep.get("method") != "GET" or not isinstance(fields, dict) or not isinstance(path_fields, dict) \
+            or not (fields or path_fields):
+        fail(errors, where, "strict_query requires a GET with declared queryParams or pathParams")
         return
-    if "{" in str(ep.get("path", "")) or (ep.get("input") or {}).get("body"):
-        fail(errors, where, "strict_query cannot use path placeholders or body inputs")
-    for name, spec in fields.items():
+    if inp.get("body"):
+        fail(errors, where, "strict_query cannot use body inputs")
+    placeholders = set(re.findall(r"{(\w+)}", str(ep.get("path", ""))))
+    if placeholders != set(path_fields):
+        fail(errors, where, "strict_query pathParams must match path placeholders")
+    for name, spec in (fields | path_fields).items():
         if not isinstance(spec, dict):
             fail(errors, where, f"strict query field {name} must be a mapping")
         elif "enum" in spec and (not isinstance(spec["enum"], list) or not spec["enum"]
@@ -284,6 +290,17 @@ def check_body_allowlist(ep: dict, where: str, errors: list[str]) -> None:
         fail(errors, where, "body_allowlist must be true when present")
     elif ep.get("method") not in {"POST", "PUT", "PATCH"} or not isinstance(fields, dict) or not fields:
         fail(errors, where, "body_allowlist requires a body method with declared body fields")
+    for name, spec in (fields if isinstance(fields, dict) else {}).items():
+        if not isinstance(spec, dict):
+            continue
+        for rule in ("item_required_all", "item_required_any"):
+            if rule not in spec:
+                continue
+            values = spec[rule]
+            if (spec.get("type") != "array[object]" or not isinstance(values, list) or not values
+                    or any(not isinstance(value, str) or not value.strip() for value in values)
+                    or len(values) != len(set(values))):
+                fail(errors, where, f"body.{name}.{rule} requires distinct field names on array[object]")
 
 
 def check_platform_request(rule: object, input_schema: object, where: str,
@@ -705,7 +722,7 @@ def check_async_descriptor(descriptor: object, where: str, provider: str,
             if not isinstance(values, list) or (name == "success" and not values) \
                     or (name in {"progress", "billed_failure"} and not values):
                 fail(errors, where, f"async.status.{name} must be a non-empty list")
-            elif any(isinstance(value, (dict, list, bool)) or value is None
+            elif any(isinstance(value, (dict, list)) or value is None
                      or not str(value).strip() for value in values):
                 fail(errors, where, f"async.status.{name} values must be non-empty strings or numbers")
         groups = [values for values in (progress, success, failure, billed_failure)
@@ -1002,8 +1019,18 @@ def check_cost(cost: dict, where: str, errors: list[str], warnings: list[str],
         check_cost_table(cost, input_schema, where, errors, provider)
     if not has_table:
         settle = cost.get("settle")
-        if settle is not None and settle not in ("base", "modifiers", "usage", "quantity"):
-            fail(errors, where, "cost.settle currently supports only 'base', 'modifiers', 'usage' or 'quantity'")
+        if settle is not None and settle not in ("base", "modifiers", "usage", "quantity", "terminal_presence"):
+            fail(errors, where, "cost.settle currently supports only 'base', 'modifiers', 'usage', 'quantity' or 'terminal_presence'")
+        presence = cost.get("presence")
+        if settle == "terminal_presence":
+            if (cost.get("type") != "per_success" or "reported_charge" in cost
+                    or not isinstance(presence, dict)
+                    or not {"field"} <= set(presence) <= {"row", "field", "request_field"}
+                    or any(not isinstance(presence.get(key), str)
+                           or not JSON_PATH.fullmatch(presence[key]) for key in presence)):
+                fail(errors, where, "cost.settle terminal_presence requires a per_success price and presence.field JSON path (optional row)")
+        elif presence is not None:
+            fail(errors, where, "cost.presence requires settle: terminal_presence")
         if settle == "quantity" or "quantity" in cost:
             check_cost_quantity(cost, input_schema, where, errors)
         if settle == "usage":
@@ -1431,11 +1458,23 @@ def main(argv: list[str]) -> int:
                 # verification observed (a DataForSEO extended row carries `observed_cost` only).
                 check_async_descriptor(effective_async, where, str(service), endpoint_index,
                                        _effective_cost(ep), errors)
+                if isinstance(cost, dict) and cost.get("settle") == "terminal_presence":
+                    body_fields = inp.get("body") or {}
+                    bounded = any(isinstance(spec, dict) and str(spec.get("type", "")).startswith("array")
+                                  and spec.get("required") and spec.get("minItems") == 1
+                                  and spec.get("maxItems") == 1 for spec in body_fields.values())
+                    root_result = "row" not in cost["presence"]
+                    scalar_body = not any(isinstance(spec, dict) and str(spec.get("type", "")).startswith("array")
+                                          for spec in body_fields.values())
+                    if not ep.get("body_allowlist") or (not bounded and not (root_result and scalar_body)):
+                        fail(errors, where, "terminal_presence requires body_allowlist and a singular request body")
                 terminal_ex = ep.get("terminal_example_response")
                 if terminal_ex is not None and not (CATALOG / str(terminal_ex)).is_file():
                     fail(errors, where, f"terminal_example_response '{terminal_ex}' does not exist")
             elif ep.get("terminal_example_response") is not None:
                 fail(errors, where, "terminal_example_response requires an async descriptor")
+            elif isinstance(cost, dict) and cost.get("settle") == "terminal_presence":
+                fail(errors, where, "terminal_presence requires an async descriptor")
             if ep.get("resource_ownership") is not None:
                 check_resource_ownership(ep["resource_ownership"], where, inp, errors)
             if ep.get("managed_resource") is not None:

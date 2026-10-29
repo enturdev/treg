@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **`X-Treg-Route-Confirm` on `treg.people.email.find`.** An opt-in header: a hit counts only once
+  a second provider returns the same address, so one provider's wrong guess no longer comes back
+  alone. Each extra attempt is billed at its own price inside `X-Treg-Route-Max-Cost`. The first
+  address is returned either way, with `_treg.confirmation` and `X-Treg-Route-Confirmed` saying
+  whether another provider agreed. Without the header nothing changes.
+
 - **`jev-memory`, a memory for Claude Code.** A workflow skill (`npx skills add superdesigndev/treg
   --skill jev-memory`, or `/skills/jev-memory/SKILL.md`) that installs the Claude Code mod in
   `examples/claude-code-mods/jev-memory`, or has Claude build the same mod from one prompt. After

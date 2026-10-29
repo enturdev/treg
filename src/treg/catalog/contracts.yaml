@@ -46,6 +46,9 @@ contracts:
     advice_unverified: "This address was found, not confirmed deliverable (verified != true). Send X-Treg-Route-Verify: true and treg checks it with treg.people.email.verify in the same call, or run that check yourself before outreach — a fraction of a cent, and it catches catch-all domains and dead mailboxes."
     # `X-Treg-Route-Verify`: checks every hit, a finder's own `verified` included; BounceBan first here only.
     check: {endpoint: treg.people.email.verify, field: email, prefer: [bounceban]}
+    # `X-Treg-Route-Confirm`: a hit counts only once a second provider returns the same address.
+    # Finders that guess from the same name patterns can still agree on a wrong one.
+    confirm: email
 
   people.email.find.personal:
     summary: "Find someone's personal email from their LinkedIn URL or work email — treg picks the provider (own keys first, then cheapest per hit) and names the one that served"

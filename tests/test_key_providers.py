@@ -96,6 +96,33 @@ async def test_crawl4ai_rejects_a_key_its_balance_endpoint_refuses(clients, monk
     assert "rejected" in response.text
 
 
+async def test_dropcontact_key_uses_credit_balance_probe(clients, monkeypatch):
+    def probe(request):
+        assert request.method == "POST"
+        assert request.url.path == "/v1/enrich/all"
+        assert request.headers["x-access-token"] == "own-key"
+        assert json.loads(request.content) == {"data": [{}]}
+        return httpx.Response(200, json={"credits_left": 4050})
+
+    async with AsyncClient(transport=httpx.MockTransport(probe)) as upstream:
+        monkeypatch.setattr(app.state, "http", upstream)
+        response = await clients.post(
+            "/connections/token", json={"provider": "dropcontact", "token": "own-key"},
+        )
+    assert response.status_code == 200, response.text
+
+
+async def test_dropcontact_rejects_unknown_account(clients, monkeypatch):
+    async with AsyncClient(transport=httpx.MockTransport(
+            lambda request: httpx.Response(401, json={"error": True, "reason": "Unknown account"}))) as upstream:
+        monkeypatch.setattr(app.state, "http", upstream)
+        response = await clients.post(
+            "/connections/token", json={"provider": "dropcontact", "token": "bogus-key"},
+        )
+    assert response.status_code == 422, response.text
+    assert "rejected" in response.text
+
+
 async def test_search1api_key_uses_free_usage_probe(clients, monkeypatch):
     def probe(request):
         assert request.method == "GET"

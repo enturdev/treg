@@ -20,6 +20,11 @@ only while what was already charged plus its catalog estimate fits under it.
 `X-Treg-Route-Verify` asks for one more call after a hit, the contract's `check` (an email find
 checked by `treg.people.email.verify`). It is its own linked child `:v` with its own hold and
 verdict, reported in `_treg.verification`; the find's answer is not altered.
+
+`X-Treg-Route-Confirm` makes a hit count only once a second provider returns the same value of the
+contract's `confirm` field: the waterfall goes on after an unconfirmed hit, each attempt at its own
+price. The first provider's answer is returned either way, reported in `_treg.confirmation`; when
+no second provider agrees, it comes back marked unconfirmed rather than as a miss.
 """
 
 from __future__ import annotations
@@ -92,11 +97,12 @@ MIN_RESULTS_HEADER = "x-treg-route-min-results"
 MERGE_HEADER = "x-treg-route-merge"
 STRICT_FILTERS_HEADER = "x-treg-route-strict-filters"
 VERIFY_HEADER = "x-treg-route-verify"
+CONFIRM_HEADER = "x-treg-route-confirm"
 _DROP_FROM_CHILD = frozenset({b"content-length", b"content-type", b"transfer-encoding", b"idempotency-key",
                               b"x-treg-route-waterfall", b"x-treg-route-max-cost", b"x-treg-route-prefer",
                               b"x-treg-route-exclude", b"x-treg-route-min-results",
                               b"x-treg-route-merge", b"x-treg-route-strict-filters",
-                              b"x-treg-route-verify", b"host"})
+                              b"x-treg-route-verify", b"x-treg-route-confirm", b"host"})
 _CALLER_FAULT = frozenset({400, 401, 403, 404, 405, 409, 422})
 _CANDIDATE_LOCAL_FAILURES = frozenset({"tool_access_denied", "policy_denied", "capability_pinned",
                                        "org_endpoint_quota_exceeded"})
@@ -149,6 +155,7 @@ class RouteOptions:
     merge: bool = False      # union the rows of every attempt that returned some (list answers only)
     strict_filters: bool = False  # drop any candidate that cannot express a filter the caller sent
     verify: bool = False     # after a hit, run the contract's check (`X-Treg-Route-Verify`)
+    confirm: bool = False    # a hit needs a second provider's same answer (`X-Treg-Route-Confirm`)
 
     @classmethod
     def from_headers(cls, get, default_max_cost_micro: int | None = None) -> "RouteOptions":
@@ -170,10 +177,11 @@ class RouteOptions:
         mg = str(get(MERGE_HEADER) or "").strip().lower()
         sf = str(get(STRICT_FILTERS_HEADER) or "").strip().lower()
         vf = str(get(VERIFY_HEADER) or "").strip().lower()
+        cf = str(get(CONFIRM_HEADER) or "").strip().lower()
         return cls(waterfall=wf not in ("0", "false", "no", "off"),
                    max_cost_micro=max_cost, prefer=_list(get(PREFER_HEADER)), exclude=_list(get(EXCLUDE_HEADER)),
                    min_results=mr, merge=mg in ("1", "true", "yes", "on"), strict_filters=sf in ("1", "true", "yes", "on"),
-                   verify=vf in ("1", "true", "yes", "on"))
+                   verify=vf in ("1", "true", "yes", "on"), confirm=cf in ("1", "true", "yes", "on"))
 
 
 class _Bytes:
@@ -482,6 +490,15 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
             "error": "route_verify_unsupported", "endpoint_id": ep["id"],
             "message": f"{VERIFY_HEADER} works only on {', '.join(checked)}; {ep['id']} has no check. "
                        "Nothing was charged."})
+    if options.confirm and (contract is None or not contract.confirm or not options.waterfall):
+        # Refused before anything is planned or held, like the check: an agent must not believe a
+        # second provider was asked. With the waterfall off there is no second provider to ask.
+        confirmable = sorted(f"treg.{cap}" for cap, c in catalog_store.load().contracts.items() if c.confirm)
+        raise ResolutionFailed("catalog_parameter_invalid", status_code=422, detail={
+            "error": "route_confirm_unsupported", "endpoint_id": ep["id"],
+            "message": (f"{CONFIRM_HEADER} needs the waterfall; drop {WATERFALL_HEADER}: 0. " if contract and contract.confirm else
+                        f"{CONFIRM_HEADER} works only on {', '.join(confirmable)}; {ep['id']} has no confirm field. ")
+                       + "Nothing was charged."})
     await capacity_view.load()
     if get_settings().overflow_mode != "off":
         await overflow_routes_view.load()
@@ -516,6 +533,8 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
     weak_hits = 0
     best: tuple[int, tuple[Candidate, dict, dict, bytes]] | None = None   # best WEAK answer seen
     cost_capped = False            # true when any candidate was skipped due to max-cost ceiling
+    unconfirmed: list[tuple[str, tuple]] = []   # X-Treg-Route-Confirm: hits waiting for a second provider
+    confirmed_by: str | None = None
     for n, cand in enumerate(plan.candidates):
         if options.max_cost_micro is not None and spent + (cand.price_micro or 0) > options.max_cost_micro:
             tried.append(Attempt(cand.endpoint["id"], cand.endpoint["provider"], "skipped", None, 0, "would exceed max cost"))
@@ -781,9 +800,24 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
             if weak_hits > MAX_WEAK_FALLBACKS:
                 break
             continue
+        if options.confirm:
+            # A hit counts once ANOTHER provider returns the same value (one provider's two
+            # endpoints share a source). The earlier hit is the answer: it was the cheaper ask.
+            value = str(core.get(plan.contract.confirm) or "").strip().lower()
+            agreed = next((h for v, h in unconfirmed if v == value
+                           and h[0].endpoint["provider"] != cand.endpoint["provider"]), None)
+            if agreed is None:
+                unconfirmed.append((value, (cand, doc, core, raw)))
+                continue
+            confirmed_by = cand.endpoint["provider"]
+            answers.append(agreed)
+            winner = agreed
+            break
         answers.append((cand, doc, core, raw))
         winner = (cand, doc, core, raw)
         break
+    if winner is None and unconfirmed:
+        winner = unconfirmed[0][1]   # nobody agreed: the first hit, marked unconfirmed
     if winner is None and best is not None:
         winner = best[1]          # nobody cleared min_results — the fullest answer we paid for wins
     if winner is None:
@@ -854,12 +888,15 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
             advice = check.skip_advice   # the caller asked; say why this hit was not checked
     elif options.verify:
         verification = _unchecked("no_hit")   # a miss is never checked; say why
+    confirmation = ({"field": plan.contract.confirm, "confirmed": confirmed_by is not None, "confirmed_by": confirmed_by}
+                    if options.confirm and winner_outcome in ("hit", "weak") else None)
     body_out = {"output": output or {k: None for k in plan.contract.output}, "raw": doc,
                 "_treg": {"served_by": served, "provider": cand.endpoint["provider"], "tier": cand.tier,
                           **({"merged_from": merged_from} if merged_from else {}),
                           **({"advice": advice} if advice else {}),
                           "outcome": winner_outcome, "tried": [t.view() for t in tried], "charged_micro": spent,
                           **({"verification": verification} if verification is not None else {}),
+                          **({"confirmation": confirmation} if confirmation is not None else {}),
                           **({"capped": True} if cost_capped else {}),
                           **({"ignored_filters": list(cand.ignored)} if cand.ignored else {}),
                           **({"dropped": plan.dropped} if plan.dropped else {})}}
@@ -872,6 +909,7 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
                                  **({"X-Treg-Merged-From": ",".join(merged_from)} if merged_from else {}),
                                  **({"X-Treg-Ignored-Filters": ",".join(cand.ignored)} if cand.ignored else {}),
                                  **({"X-Treg-Route-Capped": "true"} if cost_capped else {}),
+                                 **({"X-Treg-Route-Confirmed": str(confirmation["confirmed"]).lower()} if confirmation else {}),
                                  "X-Treg-Route-Outcome": winner_outcome}), spent
 
 

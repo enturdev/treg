@@ -278,6 +278,16 @@ find plus check. The answer adds `_treg.verification: {verdict, checked, served_
 (`no_hit`, `over_cost_limit`, `checker_failed`, `no_checker`, `not_allowed`, `spend_limit`) mean
 no check ran and it cost nothing. A miss is never checked: its reason is `no_hit`. Other routed tools refuse the header (422, unbilled).
 
+`X-Treg-Route-Confirm: true` on `treg.people.email.find` counts a hit only once a second provider
+returns the same address. The waterfall goes on after the first hit, each attempt at its own price
+inside `X-Treg-Route-Max-Cost`, so a confirmed answer usually costs two finds. The first address is
+returned either way, with `_treg.confirmation: {field, confirmed, confirmed_by}` and
+`X-Treg-Route-Confirmed: true|false`; when nobody agrees it comes back unconfirmed, not as a miss.
+Fewer wrong addresses get through, at a higher price and a slower answer. It needs the waterfall:
+with `X-Treg-Route-Waterfall: 0`, or on a routed tool without a confirm field, the header is
+refused (422, unbilled). Agreement is not delivery: combine it with `X-Treg-Route-Verify` to also
+check the mailbox.
+
 On `treg.people.phone.find` the same header checks the line with HLR Lookup's live network lookup
 (`hlrlookup.people.phone.verify`): your own HLR key first, `usa_status` only for `+1` numbers, no
 cache reads. The verdict is `live` / `dead` / `unknown`; a live line is not proof the number is

@@ -28,6 +28,15 @@ async def _get(c: httpx.AsyncClient, url: str, **kw) -> dict:
     return r.json()
 
 
+async def _orbisearch(c, key):
+    d = await _get(c, "https://api.orbisearch.com/v1/credits",
+                   headers={"X-API-Key": key})
+    balance = _finite(d.get("credits")) if isinstance(d, dict) else None
+    if balance is None or balance < 0:
+        raise ValueError("OrbiSearch returned no valid credit balance")
+    return {"value": balance, "unit": "credits", "note": "prepaid credit balance"}
+
+
 def _finite(raw):
     """A finite JSON number, sign kept; None for anything else (Booleans and strings included)."""
     return raw if type(raw) in (int, float) and math.isfinite(raw) else None
@@ -415,6 +424,17 @@ async def _blitzapi(c, key):
                     f"per-endpoint limit {rps if type(rps) is int else 'unknown'} requests/s"}
 
 
+async def _mobiusengine_jobs(c, key):
+    # Free: GET /v1/balance spends nothing and answers 401 for a bad key. A wallet account answers its prepaid
+    # dollars; an account on a monthly plan answers mode "plan" and no balance, which is not a usable slot.
+    d = await _get(c, "https://jobs-api.arihaan.ai/v1/balance", headers={"x-api-key": key})
+    left = _finite(d.get("balance_usd")) if isinstance(d, dict) and d.get("mode") == "wallet" else None
+    if left is None or left < 0:
+        raise ValueError("MobiusEngine Jobs Data returned no pay-per-job balance")
+    return {"value": left, "unit": "USD left",
+            "note": "prepaid pay-per-job balance; HTTP 402 insufficient_balance at zero"}
+
+
 async def _dropleads(c, key):
     d = await _get(c, "https://prime.dropleads.io/api/v2/prime-db/credits/balance",
                    headers={"X-API-Key": key})
@@ -581,6 +601,20 @@ async def _bounceban(c, key):
             or not math.isfinite(credits) or credits < 0):
         raise ValueError("BounceBan returned no valid verification-credit balance")
     return {"value": credits, "unit": "verification credits", "note": ""}
+
+
+async def _dropcontact(c, key):
+    response = await c.post(
+        "https://api.dropcontact.com/v1/enrich/all",
+        headers={"X-Access-Token": key}, json={"data": [{}]},
+    )
+    response.raise_for_status()
+    data = response.json()
+    credits = data.get("credits_left") if isinstance(data, dict) and not data.get("error") else None
+    if (isinstance(credits, bool) or not isinstance(credits, (int, float))
+            or not math.isfinite(credits) or credits < 0):
+        raise ValueError("Dropcontact returned no valid credit balance")
+    return {"value": credits, "unit": "credits", "note": ""}
 
 
 async def _zerobounce(c, key):
@@ -777,6 +811,14 @@ async def _anymailfinder(c, key):
     credits = d.get("credits_left")
     if isinstance(credits, bool) or not isinstance(credits, int) or credits < 0:
         raise ValueError("Anymail Finder account returned an invalid credit balance")
+    return {"value": credits, "unit": "credits", "note": ""}
+
+
+async def _enrow(c, key):
+    d = await _get(c, "https://api.enrow.io/account/info", headers={"x-api-key": key})
+    credits = _finite(d.get("credits")) if isinstance(d, dict) else None
+    if credits is None or credits < 0:
+        raise ValueError("Enrow account returned an invalid credit balance")
     return {"value": credits, "unit": "credits", "note": ""}
 
 
@@ -1004,6 +1046,8 @@ async def _piapi(c, key):
 
 
 BALANCE_ROUTES = {
+    "orbisearch": _orbisearch,
+    "dropcontact": _dropcontact,
     "theirstack": _theirstack,
     "anyapi": _anyapi,
     "cloro": _cloro,
@@ -1028,6 +1072,7 @@ BALANCE_ROUTES = {
     "companyenrich": _companyenrich,
     "findymail": _findymail,
     "anymailfinder": _anymailfinder,
+    "enrow": _enrow,
     "leadsforge": _leadsforge,
     "oceanio": _oceanio,
     "predictleads": _predictleads,
@@ -1056,6 +1101,7 @@ BALANCE_ROUTES = {
     "fetchinio": _fetchinio,
     "sixtyfour": _sixtyfour,
     "blitzapi": _blitzapi,
+    "mobiusengine_jobs": _mobiusengine_jobs,
     "prospeo": _prospeo,
     "aiark": _aiark,
     "wiza": _wiza,
