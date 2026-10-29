@@ -861,6 +861,15 @@
       "GET",
       "HEAD"
     ],
+    "name": "rea_growth_skill_md",
+    "path": "/skills/rea-growth/SKILL.md"
+  },
+  {
+    "kind": "APIRoute",
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
     "name": "feedback_md",
     "path": "/feedback.md"
   },
@@ -1034,6 +1043,24 @@
     ],
     "name": "aeo_page",
     "path": "/aeo"
+  },
+  {
+    "kind": "APIRoute",
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
+    "name": "rea_growth_page",
+    "path": "/rea-growth"
+  },
+  {
+    "kind": "APIRoute",
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
+    "name": "rea_growth_md",
+    "path": "/rea-growth.md"
   },
   {
     "kind": "APIRoute",

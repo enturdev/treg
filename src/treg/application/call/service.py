@@ -1597,12 +1597,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
         # A submission is deferred only when the provider actually accepted it: a 2xx whose
         # envelope fails the endpoint's `expect` rule (MiniMax answers HTTP 200 with
         # base_resp.status_code 2013 for a bad parameter) is a failure and releases now.
-        terminal_2xx = (mk.settlement_basis.get("when") == "terminal"
-                        and 200 <= response.status < 300)
-        rejected = _submission_rejected(mk, body) if terminal_2xx else ""
-        # A provider that may answer at once (`terminal_on_submission`) and did: an ordinary
-        # settle below, on the same hold, with no pending task.
-        deferred = terminal_2xx and not rejected and not _finished_on_submission(mk, body)
+        deferred, rejected = submission_state(mk, response.status, body)
         account_out_2xx = _account_out_2xx(mk, response, body)
         try:
             request.context.finalization = FinalizationState.FINALIZING
@@ -1893,6 +1888,18 @@ def _only_submits(mk) -> bool:
     """A submitting row never served from the archive: every call must reach the provider. A row
     that may answer at once (`terminal_on_submission`) archives only finished answers, so it may."""
     return _submits(mk) and (mk.async_descriptor or {}).get("terminal_on_submission") is not True
+
+
+def submission_state(mk, status: int, body: bytes) -> tuple[bool, str]:
+    """(deferred, rejected) for one answer: whether a `when: terminal` 2xx is an accepted task
+    left pending for its terminal outcome, and why one is not an accepted submission ("" when it
+    is). Every other answer settles now. Pure: reads only this checkout's catalog."""
+    if not (mk.settlement_basis.get("when") == "terminal" and 200 <= status < 300):
+        return False, ""
+    rejected = _submission_rejected(mk, body)
+    # A provider that may answer at once (`terminal_on_submission`) and did: an ordinary settle,
+    # on the same hold, with no pending task.
+    return not rejected and not _finished_on_submission(mk, body), rejected
 
 
 def _submission_rejected(mk, body: bytes) -> str:

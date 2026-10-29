@@ -976,12 +976,16 @@ class LedgerEntry(SQLModel, table=True):
     # and `entries_of` (`/billing`). With only single-column indexes the planner walks the whole
     # platform's day and filters the org in memory. Revision 0021 builds it concurrently.
     # The partial settle index carries `amount_micro` so `money.spend_since` sums a window from the
-    # index alone instead of fetching every row's heap page (revision 0089).
+    # index alone instead of fetching every row's heap page (revision 0089). The partial topup index
+    # finds a team's few top-ups without walking all of its rows (revision 0090).
     __table_args__ = (Index("ix_ledgerentry_org_id_created_at", "org_id", "created_at"),
                       Index("ix_ledgerentry_settle_org_id_created_at", "org_id", "created_at",
                             postgresql_include=["amount_micro"],
                             postgresql_where=text("kind = 'settle'"),
-                            sqlite_where=text("kind = 'settle'")))
+                            sqlite_where=text("kind = 'settle'")),
+                      Index("ix_ledgerentry_topup_org_id_created_at", "org_id", "created_at",
+                            postgresql_where=text("kind = 'topup'"),
+                            sqlite_where=text("kind = 'topup'")))
 
     id: str = Field(primary_key=True)  # uuid4 hex
     org_id: int = Field(foreign_key="org.id", index=True)

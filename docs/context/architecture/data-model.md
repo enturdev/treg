@@ -67,6 +67,7 @@ sources:
   - src/treg/alembic/versions/0087_rankings_snapshot.py
   - src/treg/alembic/versions/0088_call_usage_rollup.py
   - src/treg/alembic/versions/0089_ledgerentry_settle_spend_index.py
+  - src/treg/alembic/versions/0090_ledgerentry_topup_index.py
   - src/treg/application/call_usage_rollup.py
   - src/treg/application/call_usage.py
   - tests/test_call_usage_rollup.py
@@ -393,6 +394,10 @@ uses this metadata, never the encrypted token's shape.
   row on a cold cache. The query states `'settle'` as a constant, since Postgres matches a partial
   index only against one. A ledger too large to index within the revision's statement timeout gets
   the same index built `CONCURRENTLY` out of band first; the revision then skips a valid one.
+  A team's top-ups (the auto top-up cap's month, the next default amount, the payments page's
+  auto flags, the invoice recovery boundary) read a partial `(org_id, created_at) WHERE kind =
+  'topup'` (revision 0090), with `'topup'` likewise a constant; before it Postgres intersected the
+  `org_id` and `kind` bitmaps and read every row of the team to find a handful.
 
   **Spend per API key is the ledger's, folded the same way.** Revision 0070 adds `ApiKeySpendDay`
   (team + API key + tool + UTC day -> `spent_micro`, `charges`; primary key
