@@ -328,7 +328,10 @@ async def test_public_page_and_tasks_but_no_anonymous_spending(clients):
     work = next(t for t in tasks if t["id"] == "people.email.find")
     names = work["provider_previews"][0]
     assert all(isinstance(p["estimate_micro"], int) and p["estimate_micro"] >= 0 for p in names)
-    assert all(p["price_type"] == "per_success" for p in names)
+    from treg.domain.catalog import store as catalog_store
+    catalog = catalog_store.load()
+    assert all(p["price_type"] == catalog.by_id[p["endpoint_id"]]["cost"]["type"] for p in names)
+    assert any(p["provider"] == "orbisearch" and p["price_type"] == "per_call" for p in names)
     async with session_maker() as db:
         assert not (await db.execute(select(ArenaRun))).scalars().all()
         assert not (await db.execute(select(Hold))).scalars().all()

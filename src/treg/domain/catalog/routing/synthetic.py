@@ -69,7 +69,13 @@ def routed_endpoint(contract: Contract, children: list[dict], adapters: dict[str
                            "X-Treg-Route-* headers, never body fields. The answer is {output, raw, _treg}; "
                            "X-Treg-Served-By names the provider."
                            + (f" X-Treg-Route-Verify: true also checks a hit with {contract.check.endpoint}, "
-                              "at that call's own price, in _treg.verification." if contract.check else ""))},
+                              "at that call's own price, in _treg.verification." if contract.check else "")
+                           + (f" X-Treg-Route-Confirm: true counts a hit only once a second provider returns the same "
+                              f"{contract.confirm}, each attempt at its own price, in _treg.confirmation."
+                              if contract.confirm else "")
+                           + (" X-Treg-Route-Decisive: true counts an answer only when its verdict is "
+                              + " or ".join(contract.verdict_decisive) + ", asking up to two more providers (best measured "
+                              "first, each at its own price), in _treg.decision." if contract.verdict_decisive else ""))},
         "test_request": {"body": {k: _EXAMPLE_VALUES.get(k, "…") for k in _best_variant(contract, kids, adapters)}} if contract.identity else {},
         "cost": {"type": "per_success", "value": lo, "currency": "USD", "per": 1, "unit": "call",
                  "source": "inferred", "confidence": "documented", "checked": None,

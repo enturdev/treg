@@ -368,6 +368,32 @@ async def test_inline_success_waits_for_usage_and_then_closes_original_hold(
         assert await db.get(Hold, call_id) is None
 
 
+@pytest.mark.parametrize("emails,charged_micro", [([], 0), ([{"email": "a@example.com"}], 80_000)])
+@pytest.mark.parametrize("root_field", [False, True])
+async def test_terminal_presence_closes_async_hold_at_the_result(
+    clients: AsyncClient, monkeypatch, replicate_platform, emails, charged_micro, root_field,
+):
+    submitted = await _submit(clients, monkeypatch, {"id": "presence-result"})
+    call_id = submitted.headers["X-Treg-Call-Id"]
+    async with session_maker() as db:
+        row = await db.get(AsyncTaskRecord, call_id)
+        row.settlement_basis = settlement.derive_basis(
+            {"type": "per_success", "settle": "terminal_presence",
+             "presence": {"field": "email"} if root_field else {"row": "data.0", "field": "email"}},
+            request={}, input_schema={}, unit_micro=1_000_000,
+            terminal=True, response_estimate_micro=80_000)
+        await db.commit()
+    async def live(*args, **kwargs):
+        return _response(200, {"status": "succeeded", "output": ["https://example.invalid/result.png"],
+                               "data": [{"email": emails}], **({"email": emails} if root_field else {})})
+    monkeypatch.setattr(call_service, "relay", live)
+    assert (await clients.get("/call/replicate.predictions.get?id=presence-result")).status_code == 200
+    async with session_maker() as db:
+        row = await db.get(AsyncTaskRecord, call_id)
+        assert row.status == "settled" and row.settled_micro == charged_micro
+        assert await db.get(Hold, call_id) is None
+
+
 async def test_inline_settlement_failure_preserves_response_and_cron_recovers(
     clients: AsyncClient, monkeypatch, replicate_platform,
 ):
@@ -1193,6 +1219,34 @@ def test_basis_derivation_and_settlement_table_vs_usage():
         terminal=True)
     assert table["amount"]["kind"] == "table"
     assert settlement.settle(table, {"terminal": {}}) == 10_000
+
+    presence = settlement.derive_basis(
+        {"type": "per_success", "settle": "terminal_presence",
+         "presence": {"row": "data.0", "field": "email"}},
+        request={}, input_schema={}, unit_micro=1_000_000,
+        terminal=True, response_estimate_micro=80_000)
+    assert presence["when"] == "terminal"
+    assert presence["reserve_micro"] == 80_000
+    assert settlement.settle(presence, {"terminal": {"data": [{"email": [{"email": "a@example.com"}]}]}}) == 80_000
+    assert settlement.settle(presence, {"terminal": {"data": [{"email": []}]}}) == 0
+    assert settlement.settle(presence, {"terminal": {"data": [{"company": "Example"}]}}) == 0
+    assert settlement.settle(presence, {"terminal": {"data": []}}) == 80_000
+
+    root_presence = settlement.derive_basis(
+        {"type": "per_success", "settle": "terminal_presence",
+         "presence": {"field": "number"}},
+        request={}, input_schema={}, unit_micro=1_000_000,
+        terminal=True, response_estimate_micro=680_000)
+    assert settlement.settle(root_presence, {"terminal": {"qualification": "found",
+                                                        "number": "+15555550123"}}) == 680_000
+    assert settlement.settle(root_presence, {"terminal": {"qualification": "not_found"}}) == 0
+
+    supplied = settlement.derive_basis(
+        {"type": "per_success", "settle": "terminal_presence",
+         "presence": {"row": "data.0", "field": "email", "request_field": "data.0.email"}},
+        request={"body": {"data": [{"email": "invalid@example.com"}]}}, input_schema={},
+        unit_micro=1_000_000, terminal=True, response_estimate_micro=80_000)
+    assert settlement.settle(supplied, {"terminal": {"data": [{"email": []}]}}) == 80_000
 
     usage_cost = {"settle": "usage", "usage": {"path": "usage.cost", "unit": "usd"},
                   "fallback": {"value": 1.0}}

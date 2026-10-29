@@ -697,7 +697,14 @@ async def catalog_endpoint(
                         "X-Treg-Route-Strict-Filters": "1 = never call a provider that cannot apply a filter you sent (answers 422, nothing charged); off by default — the answer names what was ignored in X-Treg-Ignored-Filters",
                         **({"X-Treg-Route-Verify": f"true = check a hit with {contract.check.endpoint} in the same call, at its own price, "
                                                    "inside X-Treg-Route-Max-Cost; the answer is _treg.verification "
-                                                   "{verdict, checked, served_by, cost_micro}"} if contract and contract.check else {})},
+                                                   "{verdict, checked, served_by, cost_micro}"} if contract and contract.check else {}),
+                        **({"X-Treg-Route-Confirm": f"true = a hit counts only once a second provider returns the same {contract.confirm}; "
+                                                    "each attempt at its own price, inside X-Treg-Route-Max-Cost; the answer is "
+                                                    "_treg.confirmation {field, confirmed, confirmed_by}"} if contract and contract.confirm else {}),
+                        **({"X-Treg-Route-Decisive": "true = an answer counts only when its verdict decides ("
+                                                     + ", ".join(contract.verdict_decisive) + "); otherwise up to two more providers, "
+                                                     "best measured quality first, each at its own price; the answer is "
+                                                     "_treg.decision {decided, decided_by, ordered_by}"} if contract and contract.verdict_decisive else {})},
         }
     return {
         "endpoint": view | ({"routed_children": ep.get("routed_children")} if ep.get("kind") == "routed" else {}),

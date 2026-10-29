@@ -6,7 +6,7 @@
 // no setup line and no key. `setupFallback` adds the setup line for the agent's surfaces that cannot
 // install plugins.
 export type Agent = { id: string, name: string, icon: string | null, plugin?: string, connector?: boolean,
-  setupFallback?: string }
+  setupFallback?: string, directiveSetup?: boolean }
 export type Example = { k: string, cat: string, logo: string, avatar?: string, show?: string, prompt: string }
 export type OAuthGroup = { label: string, items: { s: string, n: string }[], soon: { s: string, n: string }[] }
 export type IconUrl = (icon: string | null | undefined, theme?: string) => string
@@ -27,7 +27,7 @@ export const moreAgents: Agent[] = [
   {id:'opencode',name:'opencode',icon:'opencode'},
   {id:'pi',name:'pi',icon:'pi'},
   {id:'gemini-cli',name:'Gemini CLI',icon:'gemini-color'},
-  {id:'other',name:'Other',icon:null},
+  {id:'other',name:'Other',icon:null,directiveSetup:true},
 ]
 
 export const installsInHost = (agent: Agent) => !!(agent.connector || agent.plugin)
@@ -44,6 +44,20 @@ export const command = (base: string) => 'set up treg \u2014 '+base.replace(/\/$
 export const claudeConnectorLink = (base: string) =>
   'https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Treg&connectorUrl='
   + encodeURIComponent(base.replace(/\/$/,'')+'/mcp/')
+
+// The install prompt as explicit steps rather than one pointer at llms.txt: first person, the
+// commands themselves, and the MCP route for a client with no shell.
+export function directiveSetupText(base: string, team?: string, token?: string, masked = false) {
+  const root = base.replace(/\/$/, '')
+  const shown = token ? (masked ? token.slice(0,14)+'••••••••••••••••' : token) : ''
+  const teamName = team || '<team-slug>'
+  const install = token
+    ? `1. curl -fsSL ${root}/install.sh | sh -s -- --token ${shown}\n2. treg\n   It should print team ${teamName} and a balance.`
+    : `1. curl -fsSL ${root}/install.sh | sh\n2. treg login\n   Open the link it prints for me, then run treg to confirm.`
+  return `Install treg for me and sign it in to my team ${teamName}. I approve these steps; run them in order.\n\n${install}\n\n`
+    + `If you cannot run shell commands but can add an MCP server, add ${root}/mcp/ as a remote MCP server instead, and tell me to finish the sign-in there.\n\n`
+    + `How treg works: ${root}/llms.txt`
+}
 
 export function setupText(command: string, team?: string, token?: string, masked = false) {
   if(!team&&!token) return command

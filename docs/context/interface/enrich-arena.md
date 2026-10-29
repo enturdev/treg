@@ -324,7 +324,8 @@ component carries no layout of its own, so a change to its markup is checked on 
 `treg-agent` choice, expanded agent list and the install-in-host step are shared: a connector
 (Claude.ai) or plugin agent (Codex, Grok Bot) gets one button and signs in there over OAuth, with no
 setup line or key; Codex adds the setup line underneath for its IDE extension, which installs no
-plugins. The setup text points
+plugins. Other gets explicit steps instead of the one-line setup line (`directiveSetupText`): the
+token install command, a `treg` check, and the MCP URL for a client with no shell. The setup text points
 to this deployment's `/llms.txt`. Continuing as a signed-in team member fetches `/auth/cli-token`
 for the active team; the token is masked by default, copied only on click, never persisted by the
 modal, and cleared when it closes. Stale responses cannot restore a closed or wrong-team token.

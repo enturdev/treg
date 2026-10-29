@@ -46,6 +46,9 @@ contracts:
     advice_unverified: "This address was found, not confirmed deliverable (verified != true). Send X-Treg-Route-Verify: true and treg checks it with treg.people.email.verify in the same call, or run that check yourself before outreach — a fraction of a cent, and it catches catch-all domains and dead mailboxes."
     # `X-Treg-Route-Verify`: checks every hit, a finder's own `verified` included; BounceBan first here only.
     check: {endpoint: treg.people.email.verify, field: email, prefer: [bounceban]}
+    # `X-Treg-Route-Confirm`: a hit counts only once a second provider returns the same address.
+    # Finders that guess from the same name patterns can still agree on a wrong one.
+    confirm: email
 
   people.email.find.personal:
     summary: "Find someone's personal email from their LinkedIn URL or work email — treg picks the provider (own keys first, then cheapest per hit) and names the one that served"
@@ -149,7 +152,7 @@ contracts:
       linkedin_handle: "linkedin_handle(linkedin_url)"
     filters: {}
     output:
-      phone: {type: str, required: true, note: "as the provider formats it; E.164 when it offers one, and +1 added to a 10-digit number the provider marks US or CA"}
+      phone: {type: str, required: true, note: "as the provider formats it; E.164 when it offers one, and +1 added to a 10-digit number the provider marks US or CA", analytics: key}
       line_type: {type: str, analytics: value}
       country_code: {type: str, analytics: value}
     miss: "phone == null"
@@ -206,7 +209,8 @@ contracts:
     idempotent: true
     # Stored per call. Each adapter maps its provider's words (`verdicts`); `unknown` is a word,
     # not a miss, and catch-all is kept apart from `risky` so it can be counted on its own.
-    verdict: {from: status, words: [valid, invalid, catch_all, risky, unknown]}
+    # `decisive`: the words that answer the question, for `X-Treg-Route-Decisive` (route.py).
+    verdict: {from: status, words: [valid, invalid, catch_all, risky, unknown], decisive: [valid, invalid]}
 
   people.enrich:
     summary: "Enrich a person from an email, a LinkedIn URL or a name + company domain — treg picks the provider and names the one that served"
@@ -449,6 +453,7 @@ contracts:
       about: {type: str}
       linkedin_url: {type: str}
     miss: "full_name == null"
+    complete: [full_name, headline, location]   # X-Treg-Route-Complete only
     idempotent: true
 
   linkedin.user.posts:

@@ -652,6 +652,10 @@ def _observed_cost_micro(mk: MarketplaceCall, body: bytes, headers=None) -> int 
             # HarvestAPI answers a full queue (429) or no backend (503) as a 200 without `cost`.
             return 0
         # Missing or invalid charge evidence leaves the normal miss/base rules in force.
+    counted = (ep.get("cost") or {}).get("settle") if ep else None
+    if isinstance(counted, dict) and mk.unit_micro > 0:
+        rows = _dig(doc, counted["count"]["path"])
+        return _rows_billed_micro(mk, ep, len(rows) if isinstance(rows, list) else None)
     if provider == "sumble":
         credits = doc.get("credits_used")
         # The request-time credit freezes the rate, including legitimate zero usage. Not
@@ -719,9 +723,8 @@ def _observed_cost_micro(mk: MarketplaceCall, body: bytes, headers=None) -> int 
         n = len(data) if isinstance(data, list) else (1 if data else 0)
         return n * mk.unit_micro
     if provider == "influencersclub" and mk.cost_type == "per_result" and mk.unit_micro > 0:
-        # Discovery bills per creator RETURNED (cost.value credits each, e.g. 0.01 for search/similar,
-        # 0.03 for search with return_filter_values=true). The `accounts` array is invisible to the
-        # generic counters. An envelope without `accounts` (an error shape) costs nothing.
+        # Discovery bills per creator RETURNED. The `accounts` array is invisible to the generic
+        # counters. An envelope without `accounts` (an error shape) costs nothing.
         rows = doc.get("accounts")
         row_count = sum(item is not None for item in rows) if isinstance(rows, list) else 0
         return _rows_billed_micro(mk, ep, row_count)
