@@ -5999,6 +5999,7 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
         template += " --await --timeout 900"
     view = head | {
         "job": e.get("capability"),
+        "upstream": f"{e['method']} {e['path']}" if e.get("method") and e.get("path") else None,
         "price": _cost_usd(cost) if cost else "not priced",
         # the provider's own number, behind the USD one; skipped when `_cost_usd` already fell back to it
         "native_price": _native_amount(cost["value"], cost["currency"])
@@ -6015,7 +6016,7 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
         **_params_view(e.get("input") or {}),
         **_price_table_view(cost),
         "async": _async_view(e.get("async")),
-        "example_response": body.get("example_response"),
+        **_example_view(body.get("example_response"), e["id"], cfg),
         **_compare_view(e, body, cfg, limit),
         "provider": f"{prov.get('display_name', e['provider'])} ({e['provider']})",
         "limits": prov.get("limits"),
@@ -6032,6 +6033,51 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
     if others:
         help_lines.append(f"treg catalog get {others[0]}   # the next way to do this job in compare")
     _emit(view, help_lines)
+
+
+EXAMPLE_FIELDS = 40
+
+
+def _example_view(example, endpoint_id: str, cfg) -> dict:
+    """The example response's shape, cut at about `EXAMPLE_FIELDS` values: it shows what comes back, not
+    data to read, so the rest is a link. Each object keeps its own plain fields before its nested ones
+    (a page's `total` and cursor outrank the twentieth field of its first row), a list keeps its first
+    item, and whatever is cut goes whole, so the cut still decodes."""
+    if example is None:
+        return {}
+    budget = [EXAMPLE_FIELDS]
+
+    def nested(x) -> bool:
+        return isinstance(x, (dict, list))
+
+    def clip(v):
+        if isinstance(v, list):
+            return [clip(v[0])] if v and budget[0] > 0 else []
+        if not isinstance(v, dict):
+            budget[0] -= 1
+            return v
+        kept = {}
+        for k, x in v.items():
+            if not nested(x) and budget[0] > 0:
+                budget[0] -= 1
+                kept[k] = x
+        for k, x in v.items():
+            if nested(x) and budget[0] > 0:
+                kept[k] = clip(x)
+        return {k: kept[k] for k in v if k in kept}
+
+    def leaves(v) -> int:
+        if isinstance(v, dict):
+            return sum(leaves(x) for x in v.values())
+        if isinstance(v, list):
+            return sum(leaves(x) for x in v)
+        return 1
+
+    clipped, total = clip(example), leaves(example)
+    base = (cfg.get("base_url") or PRODUCTION_BASE_URL).rstrip("/")
+    return {"example_response": clipped,
+            "example_more": f"cut to {leaves(clipped)} of {total} values; the whole example: "
+                            f"{base}/catalog/examples/{endpoint_id}" if leaves(clipped) < total else None}
 
 
 def _with_route_cap(template: str) -> str:
@@ -6260,7 +6306,7 @@ def _compare_rows(endpoints: list[dict]) -> list[dict]:
     for x in endpoints:
         obs = x.get("observed") or {}
         rows.append({"id": x["id"], "price": _cost_usd(x.get("cost")), "works": _pct(obs.get("ok_rate")),
-                     "calls": obs.get("samples"), "hit": _pct(obs.get("hit_rate")), "p50": _duration(obs.get("p50_ms")),
+                     "calls": _count(obs.get("samples")), "hit": _pct(obs.get("hit_rate")), "p50": _duration(obs.get("p50_ms")),
                      "last_ok_days": obs.get("last_ok_days"), "verified": x.get("verified")})
     return cli_view.table(rows, _COMPARE_FIELDS)
 
@@ -6278,6 +6324,14 @@ def _compare_rank(s: dict) -> tuple:
     usd = cost.get("usd")
     known = isinstance(usd, (int, float)) and not cost.get("varies")
     return (rate is None, -round(rate or 0, 2), usd if known else float("inf"))
+
+
+def _count(n) -> int | str | None:
+    """A sample size to the magnitude that weighs a rate: 124 stays exact, 1622303 is 1.6M."""
+    if not isinstance(n, int) or n < 1000:
+        return n
+    v, unit = (n / 1e6, "M") if n >= 999_500 else (n / 1e3, "k")
+    return (f"{v:.1f}".rstrip("0").rstrip(".") if v < 10 else str(round(v))) + unit
 
 
 def _pct(rate) -> str | None:
