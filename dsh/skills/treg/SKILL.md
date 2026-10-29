@@ -141,14 +141,13 @@ How a routed call works:
 - `catalog_get` on a routed id shows the ranked plan and its prices before you spend.
 
 **A found contact is not a confirmed one.** An email or phone find returns the provider's best
-match. Only `output.verified: true` means the mailbox was checked; otherwise `_treg.advice` names
-the verify step. Run it before anyone sends, and never re-send the same find: every hit is billed,
-repeats included.
+match; `_treg.advice` says when it still needs checking. Verify before anyone sends, and never
+re-send the same find: every hit is billed, repeats included.
 
 - Send `X-Treg-Route-Verify: true` on `treg.people.email.find`, `treg.people.email.find.personal` or
   `treg.people.phone.find` to check each hit in the same call, as its own small charge. Read
-  `_treg.verification.verdict` and follow `_treg.advice`. A live phone line does not prove the
-  number is this person's.
+  `_treg.verification.verdict` (it wins over the provider's own `output.verified`) and follow
+  `_treg.advice`. A live phone line does not prove the number is this person's.
 - **Verify every address before it is sent to**, including rows from a company or domain search
   (`treg.people.search` and the like): those are directory listings, unconfirmed
   unless the row's own verification field says otherwise. `invalid` is dead, `accept_all` is risky,
