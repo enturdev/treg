@@ -25,6 +25,13 @@ verdict, reported in `_treg.verification`; the find's answer is not altered.
 contract's `confirm` field: the waterfall goes on after an unconfirmed hit, each attempt at its own
 price. The first provider's answer is returned either way, reported in `_treg.confirmation`; when
 no second provider agrees, it comes back marked unconfirmed rather than as a miss.
+
+`X-Treg-Route-Decisive` makes an answer count only when its verdict word is one the contract's
+`verdict.decisive` lists (an email check: valid or invalid). Any other word (unknown, catch-all,
+risky) or a failed attempt sends the call on, at most two more providers, each at its own price;
+the providers left are then asked in order of measured verdict quality (domain/catalog/routing/
+quality.py) where it is known, in their price order where it is not. When none decides, the first
+undecided answer comes back, reported in `_treg.decision`.
 """
 
 from __future__ import annotations
@@ -50,6 +57,7 @@ from ...domain.catalog import results as catalog_results
 from ...domain.catalog import stats as endpoint_stats
 from ...domain.catalog import store as catalog_store
 from ...domain.catalog.routing import paths as P
+from ...domain.catalog.routing import quality as route_quality
 from ...domain.catalog.routing.contracts import canonical_identity, declared_miss, declared_not_found, miss_status
 from ...domain.catalog.routing.plan import (
     MAX_ERROR_FALLBACKS, Candidate, Plan, candidates_for, cost_at, ignored_filters, rank, unscoped,
@@ -78,6 +86,25 @@ def clear_endpoint_observation_reader(reader: endpoint_stats.EndpointObservation
         _endpoint_observation_reader = None
 
 
+_route_quality_reader: route_quality.RouteQualityReader | None = None
+
+
+def configure_route_quality_reader(reader: route_quality.RouteQualityReader | None) -> None:
+    """Bind the measured verdict quality `X-Treg-Route-Decisive` orders by; None = price order."""
+    global _route_quality_reader
+    _route_quality_reader = reader
+
+
+async def _route_quality(capability: str) -> route_quality.Snapshot | None:
+    if _route_quality_reader is None:
+        return None
+    try:
+        return await _route_quality_reader.get(capability)
+    except Exception:  # quality only orders the fallback; no data keeps price order
+        log.warning("route quality unavailable", exc_info=True)
+        return None
+
+
 async def _observed_stats(endpoint_ids: list[str]) -> endpoint_stats.ObservationSnapshot:
     """Read advisory routing evidence without making the request wait for its DB aggregate."""
     reader = _endpoint_observation_reader
@@ -98,11 +125,13 @@ MERGE_HEADER = "x-treg-route-merge"
 STRICT_FILTERS_HEADER = "x-treg-route-strict-filters"
 VERIFY_HEADER = "x-treg-route-verify"
 CONFIRM_HEADER = "x-treg-route-confirm"
+DECISIVE_HEADER = "x-treg-route-decisive"
 _DROP_FROM_CHILD = frozenset({b"content-length", b"content-type", b"transfer-encoding", b"idempotency-key",
                               b"x-treg-route-waterfall", b"x-treg-route-max-cost", b"x-treg-route-prefer",
                               b"x-treg-route-exclude", b"x-treg-route-min-results",
                               b"x-treg-route-merge", b"x-treg-route-strict-filters",
-                              b"x-treg-route-verify", b"x-treg-route-confirm", b"host"})
+                              b"x-treg-route-verify", b"x-treg-route-confirm",
+                              b"x-treg-route-decisive", b"host"})
 _CALLER_FAULT = frozenset({400, 401, 403, 404, 405, 409, 422})
 _CANDIDATE_LOCAL_FAILURES = frozenset({"tool_access_denied", "policy_denied", "capability_pinned"})
 _GLOBAL_REFUSALS = frozenset({"insufficient_balance", "tag_spend_cap_reached",
@@ -154,6 +183,7 @@ class RouteOptions:
     strict_filters: bool = False  # drop any candidate that cannot express a filter the caller sent
     verify: bool = False     # after a hit, run the contract's check (`X-Treg-Route-Verify`)
     confirm: bool = False    # a hit needs a second provider's same answer (`X-Treg-Route-Confirm`)
+    decisive: bool = False   # a hit needs a deciding verdict word (`X-Treg-Route-Decisive`)
 
     @classmethod
     def from_headers(cls, get, default_max_cost_micro: int | None = None) -> "RouteOptions":
@@ -176,10 +206,12 @@ class RouteOptions:
         sf = str(get(STRICT_FILTERS_HEADER) or "").strip().lower()
         vf = str(get(VERIFY_HEADER) or "").strip().lower()
         cf = str(get(CONFIRM_HEADER) or "").strip().lower()
+        dc = str(get(DECISIVE_HEADER) or "").strip().lower()
         return cls(waterfall=wf not in ("0", "false", "no", "off"),
                    max_cost_micro=max_cost, prefer=_list(get(PREFER_HEADER)), exclude=_list(get(EXCLUDE_HEADER)),
                    min_results=mr, merge=mg in ("1", "true", "yes", "on"), strict_filters=sf in ("1", "true", "yes", "on"),
-                   verify=vf in ("1", "true", "yes", "on"), confirm=cf in ("1", "true", "yes", "on"))
+                   verify=vf in ("1", "true", "yes", "on"), confirm=cf in ("1", "true", "yes", "on"),
+                   decisive=dc in ("1", "true", "yes", "on"))
 
 
 class _Bytes:
@@ -497,6 +529,15 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
             "message": (f"{CONFIRM_HEADER} needs the waterfall; drop {WATERFALL_HEADER}: 0. " if contract and contract.confirm else
                         f"{CONFIRM_HEADER} works only on {', '.join(confirmable)}; {ep['id']} has no confirm field. ")
                        + "Nothing was charged."})
+    if options.decisive and (contract is None or not contract.verdict_decisive or not options.waterfall):
+        # Refused before anything is planned or held, like confirm: with no deciding words, or no
+        # waterfall to go on with, the caller would believe an undecided answer was the last word.
+        decidable = sorted(f"treg.{cap}" for cap, c in catalog_store.load().contracts.items() if c.verdict_decisive)
+        raise ResolutionFailed("catalog_parameter_invalid", status_code=422, detail={
+            "error": "route_decisive_unsupported", "endpoint_id": ep["id"],
+            "message": (f"{DECISIVE_HEADER} needs the waterfall; drop {WATERFALL_HEADER}: 0. " if contract and contract.verdict_decisive else
+                        f"{DECISIVE_HEADER} works only on {', '.join(decidable)}; {ep['id']} has no deciding verdict words. ")
+                       + "Nothing was charged."})
     await capacity_view.load()
     if get_settings().overflow_mode != "off":
         await overflow_routes_view.load()
@@ -533,7 +574,26 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
     cost_capped = False            # true when any candidate was skipped due to max-cost ceiling
     unconfirmed: list[tuple[str, tuple]] = []   # X-Treg-Route-Confirm: hits waiting for a second provider
     confirmed_by: str | None = None
-    for n, cand in enumerate(plan.candidates):
+    # X-Treg-Route-Decisive: answers whose verdict did not decide, the word that came back, and the
+    # measured quality the providers left are ordered by once the first attempt has not decided.
+    undecided: list[tuple] = []
+    undecided_words: list[str] = []
+    decided_by: str | None = None
+    quality = await _route_quality(ep["capability"]) if options.decisive else None
+    ordered_on: str | None = None
+    queue = list(enumerate(plan.candidates))
+    while queue:
+        # A caller's own X-Treg-Route-Prefer order stands; quality orders only the router's own choice.
+        if options.decisive and not options.prefer and any(t.outcome != "skipped" for t in tried):
+            on = "catch_all" if "catch_all" in undecided_words else "all"
+            if on != ordered_on:
+                try:
+                    queue = route_quality.by_quality(queue, lambda item: item[1].endpoint["id"], quality, on)
+                except Exception:  # quality only orders the fallback; a bad number keeps the order it had
+                    log.warning("route quality ordering failed", exc_info=True)
+                    quality = None
+                ordered_on = on
+        n, cand = queue.pop(0)
         if options.max_cost_micro is not None and spent + (cand.price_micro or 0) > options.max_cost_micro:
             tried.append(Attempt(cand.endpoint["id"], cand.endpoint["provider"], "skipped", None, 0, "would exceed max cost"))
             cost_capped = True
@@ -786,6 +846,16 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
             if weak_hits > MAX_WEAK_FALLBACKS:
                 break
             continue
+        if options.decisive:
+            word = catalog_results.verdict(cand.endpoint["id"], response.status, raw)
+            if word not in plan.contract.verdict_decisive:
+                tried[-1].outcome, tried[-1].detail = "weak", f"verdict {word or 'none'} does not decide"
+                undecided.append((cand, doc, core, raw))
+                undecided_words.append(word or "")
+                if len(undecided) > MAX_WEAK_FALLBACKS:
+                    break
+                continue
+            decided_by = cand.endpoint["provider"]
         if options.confirm:
             # A hit counts once ANOTHER provider returns the same value (one provider's two
             # endpoints share a source). The earlier hit is the answer: it was the cheaper ask.
@@ -804,6 +874,8 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
         break
     if winner is None and unconfirmed:
         winner = unconfirmed[0][1]   # nobody agreed: the first hit, marked unconfirmed
+    if winner is None and undecided:
+        winner = undecided[0]        # nobody decided: the first answer, already paid for, marked undecided
     if winner is None and best is not None:
         winner = best[1]          # nobody cleared min_results — the fullest answer we paid for wins
     if winner is None:
@@ -876,6 +948,9 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
         verification = _unchecked("no_hit")   # a miss is never checked; say why
     confirmation = ({"field": plan.contract.confirm, "confirmed": confirmed_by is not None, "confirmed_by": confirmed_by}
                     if options.confirm and winner_outcome in ("hit", "weak") else None)
+    decision = ({"decided": decided_by is not None, "decided_by": decided_by,
+                 "ordered_by": "quality" if ordered_on and quality else "price"}
+                if options.decisive and winner_outcome in ("hit", "weak") else None)
     body_out = {"output": output or {k: None for k in plan.contract.output}, "raw": doc,
                 "_treg": {"served_by": served, "provider": cand.endpoint["provider"], "tier": cand.tier,
                           **({"merged_from": merged_from} if merged_from else {}),
@@ -883,6 +958,7 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
                           "outcome": winner_outcome, "tried": [t.view() for t in tried], "charged_micro": spent,
                           **({"verification": verification} if verification is not None else {}),
                           **({"confirmation": confirmation} if confirmation is not None else {}),
+                          **({"decision": decision} if decision is not None else {}),
                           **({"capped": True} if cost_capped else {}),
                           **({"ignored_filters": list(cand.ignored)} if cand.ignored else {}),
                           **({"dropped": plan.dropped} if plan.dropped else {})}}
@@ -896,6 +972,7 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
                                  **({"X-Treg-Ignored-Filters": ",".join(cand.ignored)} if cand.ignored else {}),
                                  **({"X-Treg-Route-Capped": "true"} if cost_capped else {}),
                                  **({"X-Treg-Route-Confirmed": str(confirmation["confirmed"]).lower()} if confirmation else {}),
+                                 **({"X-Treg-Route-Decided": str(decision["decided"]).lower()} if decision else {}),
                                  "X-Treg-Route-Outcome": winner_outcome}), spent
 
 

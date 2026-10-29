@@ -209,7 +209,8 @@ contracts:
     idempotent: true
     # Stored per call. Each adapter maps its provider's words (`verdicts`); `unknown` is a word,
     # not a miss, and catch-all is kept apart from `risky` so it can be counted on its own.
-    verdict: {from: status, words: [valid, invalid, catch_all, risky, unknown]}
+    # `decisive`: the words that answer the question, for `X-Treg-Route-Decisive` (route.py).
+    verdict: {from: status, words: [valid, invalid, catch_all, risky, unknown], decisive: [valid, invalid]}
 
   people.enrich:
     summary: "Enrich a person from an email, a LinkedIn URL or a name + company domain — treg picks the provider and names the one that served"

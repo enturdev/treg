@@ -74,7 +74,11 @@ def routed_endpoint(contract: Contract, children: list[dict], adapters: dict[str
                            + (f" X-Treg-Route-Confirm: true counts a hit only once a second provider returns the same "
                               f"{contract.confirm}, each attempt at its own price; the first answer comes back either way and "
                               "_treg.confirmation {field, confirmed, confirmed_by} says whether another provider agreed."
-                              if contract.confirm else ""))},
+                              if contract.confirm else "")
+                           + (" X-Treg-Route-Decisive: true counts an answer only when its verdict is "
+                              + " or ".join(contract.verdict_decisive) + "; otherwise up to two more providers are asked, best "
+                              "measured quality first, each at its own price, and _treg.decision {decided, decided_by, ordered_by} "
+                              "says whether one decided." if contract.verdict_decisive else ""))},
         "test_request": {"body": {k: _EXAMPLE_VALUES.get(k, "…") for k in _best_variant(contract, kids, adapters)}} if contract.identity else {},
         "cost": {"type": "per_success", "value": lo, "currency": "USD", "per": 1, "unit": "call",
                  "source": "inferred", "confidence": "documented", "checked": None,

@@ -1183,6 +1183,53 @@ def test_generic_display_prices_match_web_and_cli():
     assert _platform_estimate_micro(job, {}) == 75_000
 
 
+_MOZ_ONE_ROW_PER_RETURNED = re.compile(r"1 row per returned", re.I)
+
+
+def test_moz_lists_priced_per_returned_row_show_per_result():
+    """A Moz list that bills one quota row per returned item, with `limit` choosing how many come
+    back, must quote that unit. `quota_rows` with no display unit is labelled `/call`, so a
+    `limit` of 50 looks like the one-row price. `display.unit` names the returned item; the
+    meter stays `quota_rows` and `usd` stays the price of one row."""
+    from treg.application.call.resolve import _platform_estimate_micro
+    from treg.cli import _cost_label, _cost_usd
+    from treg.routers.web import _price_label
+
+    cat = cs.load()
+    listed = []
+    for ep in cat.endpoints:
+        if ep.get("provider") != "moz":
+            continue
+        cost = ep.get("cost") or {}
+        body = (ep.get("input") or {}).get("body") or {}
+        if (cost.get("type") == "quota_rows"
+                and _MOZ_ONE_ROW_PER_RETURNED.search(cost.get("note") or "")
+                and isinstance(body, dict) and "limit" in body):
+            listed.append(ep["id"])
+    assert set(listed) == {
+        "moz.web.backlinks.list",
+        "moz.web.linking_domains.list",
+        "moz.web.anchors.list",
+        "moz.web.site.top_pages",
+        "moz.web.global.top_pages",
+        "moz.web.global.top_domains",
+    }
+    for eid in listed:
+        ep = cat.by_id[eid]
+        viewed = cat.cost_view(ep["cost"], ep["provider"])
+        assert viewed["type"] == "quota_rows" and viewed["usd"] == 0.006667, eid
+        assert viewed["display_unit"] == "result", eid
+        assert (_price_label(viewed) == _cost_usd(viewed) == _cost_label(viewed)
+                == "$0.00667/result"), eid
+        assert _platform_estimate_micro(viewed, {}, b'{"limit":1}') == 6_667, eid
+        assert _platform_estimate_micro(viewed, {}, b'{"limit":50}') == 333_350, eid
+    for eid in ("moz.web.url.metrics", "moz.web.backlinks.summary", "moz.web.index.metadata"):
+        ep = cat.by_id[eid]
+        viewed = cat.cost_view(ep["cost"], ep["provider"])
+        assert viewed["type"] == "quota_rows" and "display_unit" not in viewed, eid
+        assert _price_label(viewed).endswith("/call") and _cost_usd(viewed).endswith("/call"), eid
+
+
 async def test_every_comparison_page_in_the_sitemap_serves(clients):
     """A capability several providers serve on a shelf has a public comparison page
     (/catalog/<slug>/<key>), listed in the sitemap by the same rule the shelf uses for its comparison

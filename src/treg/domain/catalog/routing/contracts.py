@@ -64,6 +64,9 @@ class Contract:
     verdict_from: str = ""
     verdict_words: tuple[str, ...] = ()
     verdict_map: dict[str, str] = field(default_factory=dict)
+    # The verdict words that DECIDE (`valid`, `invalid`): under `X-Treg-Route-Decisive` any other
+    # word (unknown, catch-all, risky) sends the call on to the next provider. Empty = refused.
+    verdict_decisive: tuple[str, ...] = ()
     # The check a caller may ask for with `X-Treg-Route-Verify`; None = the header is refused.
     check: Check | None = None
     # The output field two providers must agree on under `X-Treg-Route-Confirm`: a hit counts only
@@ -263,7 +266,11 @@ def _parse_verdict(cap: str, raw) -> dict:
     mapping = {_verdict_key(k) or str(k): str(v) for k, v in (raw.get("map") or {}).items()}
     if not raw.get("from") or not words or any(v not in words for v in mapping.values()):
         raise ValueError(f"contract {cap}: verdict needs `from`, `words`, and a `map` into those words")
-    return {"verdict_from": str(raw["from"]), "verdict_words": words, "verdict_map": mapping}
+    decisive = tuple(str(w) for w in raw.get("decisive") or ())
+    if any(w not in words for w in decisive):
+        raise ValueError(f"contract {cap}: verdict `decisive` must be among its `words`")
+    return {"verdict_from": str(raw["from"]), "verdict_words": words, "verdict_map": mapping,
+            "verdict_decisive": decisive}
 
 
 def parse_adapters(doc: dict) -> dict[str, Adapter]:
