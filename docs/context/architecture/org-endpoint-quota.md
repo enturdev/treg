@@ -12,6 +12,7 @@ sources:
   - src/treg/infra/upstream/relay.py
   - src/treg/bootstrap.py
   - src/treg/config.py
+  - src/treg/analytics.py
   - tests/test_org_endpoint_quota_redis.py
   - tests/test_org_endpoint_quota_call.py
   - tests/test_org_endpoint_quota_hub.py
@@ -19,6 +20,7 @@ sources:
   - tests/test_org_endpoint_quota_best_effort.py
   - tests/test_org_endpoint_quota_breaker.py
   - tests/test_org_endpoint_quota_telemetry.py
+  - tests/test_org_endpoint_quota_rollup.py
   - tests/test_org_endpoint_quota_local_rejections.py
   - tests/test_org_endpoint_quota_route.py
   - tests/test_relay_quota_admission.py
@@ -98,19 +100,29 @@ failure or timeout opens a five-second circuit breaker in that process; calls du
 proceed without Redis I/O. Afterward one request probes recovery while concurrent requests still
 proceed without waiting. A failed probe starts another cooldown. Healthy requests remain concurrent.
 Requests already in flight before the first failure, and recovery probes, can still wait one second.
+Each worker discovers failures and probes recovery independently; the single-probe guarantee is
+per process, so the first concurrent requests across workers can each incur that delay. During
+recovery, one worker may enforce surviving rules while another still bypasses them in its cooldown.
 The breaker stores only availability state, never rules or counters. A valid Lua response indicating
 missing or malformed state does not open it, so one damaged rule cannot bypass another healthy rule.
 Cancellation does not open the breaker and propagates through normal hold cleanup.
 
-Every logical admission allowed without confirmed quota state, including a breaker bypass, emits
-`org_endpoint_quota_fail_open` through the existing non-blocking analytics queue. It uses the server
-identity and event-specific properties `admissions=1` and `target_count`, plus standard telemetry
-build metadata; no Org, endpoint, call ID or request data is sent.
-Count these events or sum `admissions` to observe unconfirmed logical admissions. A parent/child batch
-is one admission; retries and response replays do not emit again. This is best-effort telemetry:
-disabled telemetry, queue pressure or delivery failure can undercount. The warning remains limited
-to once per minute, but does not limit events. No dashboard, alert or production telemetry setting
-is created by this change.
+`analytics.capture_quota_fail_open` accumulates unconfirmed logical admissions, including breaker
+bypasses, into one bounded 60-second window per process. The existing analytics flusher emits one
+`org_endpoint_quota_fail_open` event when the window is due, even if calls stop; graceful shutdown
+flushes a final partial window. It uses the server identity and standard telemetry build metadata.
+Sum `admissions` to observe the volume, not event count. A parent/child batch is one admission;
+`target_count` sums target entries across batches, not distinct targets. Logical retries and response
+replays do not add to the totals.
+
+`target_examples` contains the first ten distinct trusted `{org_id, endpoint_id}` pairs observed in
+the window; `targets_truncated` records whether another distinct pair was omitted. These bounded
+examples are neither a random sample nor a complete target list. They identify calls allowed
+without confirmed quota state, not proof that a rule existed or would have refused them: Redis
+uncertainty prevents that determination. No call ID, credentials or request/response content is sent.
+These in-memory telemetry totals are not an enforcement counter. Telemetry disabled, abrupt process
+exit, queue pressure or delivery failure can lose counts and examples. The warning remains limited
+to once per minute. No dashboard, alert or production telemetry setting is created by this change.
 
 One hash without an application TTL, `treg:org-endpoint-quota:v1`, contains `__schema=1` and fields
 `rule:<org_id>:<endpoint_id>`. Each rule is exactly:

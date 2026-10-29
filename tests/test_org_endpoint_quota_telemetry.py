@@ -24,11 +24,14 @@ def events(monkeypatch):
             observed.append((distinct_id, properties, kwargs))
 
     monkeypatch.setattr(analytics, "capture", capture)
+    monkeypatch.setattr(analytics, "enabled", lambda: True)
+    monkeypatch.setattr(analytics, "_ensure_flusher", lambda: None)
+    monkeypatch.setattr(analytics, "_quota_window", None, raising=False)
     monkeypatch.setattr(call_service, "_quota_warning_at", None)
     return observed
 
 
-async def test_every_unknown_admission_is_observed_without_warning_rate_limit(
+async def test_unknown_admissions_are_aggregated_with_their_trusted_target(
     clients, monkeypatch, platform_on, events, caplog,
 ):
     _enable(monkeypatch, unavailable=True)
@@ -36,7 +39,14 @@ async def test_every_unknown_admission_is_observed_without_warning_rate_limit(
     for _ in range(3):
         response = await clients.get(f"/call/{EP}?aweme_id=synthetic-private-input")
         assert response.status_code == 200, response.text
-    assert events == [(analytics.SERVER_DISTINCT_ID, {"admissions": 1, "target_count": 1}, {})] * 3
+    assert events == []
+    analytics._emit_quota_summary(force=True)
+    org_id = (await clients.get("/orgs")).json()[0]["org_id"]
+    assert events == [(analytics.SERVER_DISTINCT_ID, {
+        "admissions": 3, "target_count": 3,
+        "target_examples": [{"org_id": org_id, "endpoint_id": EP}],
+        "targets_truncated": False,
+    }, {})]
     warnings = [r for r in caplog.records if r.name == "treg.org_endpoint_quota"]
     assert len(warnings) == 1
 
@@ -57,7 +67,14 @@ async def test_retry_and_idempotent_replay_do_not_duplicate_unknown_admission_ev
     assert replay.status_code == 200
     assert replay.headers["X-Treg-Idempotent-Replay"] == "true"
     assert len(seen) == 2 and attempts == {EP: 1}
-    assert events == [(analytics.SERVER_DISTINCT_ID, {"admissions": 1, "target_count": 1}, {})]
+    assert events == []
+    analytics._emit_quota_summary(force=True)
+    org_id = (await clients.get("/orgs")).json()[0]["org_id"]
+    assert events == [(analytics.SERVER_DISTINCT_ID, {
+        "admissions": 1, "target_count": 1,
+        "target_examples": [{"org_id": org_id, "endpoint_id": EP}],
+        "targets_truncated": False,
+    }, {})]
 
 
 async def test_routed_batch_reports_one_admission_with_both_targets(
@@ -69,7 +86,17 @@ async def test_routed_batch_reports_one_admission_with_both_targets(
     response = await clients.post(f"/call/{FIND}", json=ASK)
     assert response.status_code == 200, response.text
     assert seen == ["tomba"]
-    assert events == [(analytics.SERVER_DISTINCT_ID, {"admissions": 1, "target_count": 2}, {})]
+    assert events == []
+    analytics._emit_quota_summary(force=True)
+    org_id = (await clients.get("/orgs")).json()[0]["org_id"]
+    assert events == [(analytics.SERVER_DISTINCT_ID, {
+        "admissions": 1, "target_count": 2,
+        "target_examples": [
+            {"org_id": org_id, "endpoint_id": FIND},
+            {"org_id": org_id, "endpoint_id": "tomba.people.email.find"},
+        ],
+        "targets_truncated": False,
+    }, {})]
 
 
 @pytest.mark.parametrize("mode,status", [("disabled", 200), ("allowed", 200), ("exceeded", 429)])
@@ -82,6 +109,7 @@ async def test_confirmed_or_disabled_admission_does_not_emit_fail_open(
     monkeypatch.setattr(call_service, "relay", _fake_relay(200))
     response = await clients.get(f"/call/{EP}?aweme_id=7")
     assert response.status_code == status, response.text
+    analytics._emit_quota_summary(force=True)
     assert events == []
 
 
@@ -94,10 +122,9 @@ async def test_observation_cannot_block_or_change_billing(
     if observer == "disabled":
         monkeypatch.setattr(analytics, "enabled", lambda: False)
     else:
-        def broken(distinct_id, event, properties=None, **kwargs):
-            if event == EVENT:
-                raise RuntimeError("synthetic observer failure")
-        monkeypatch.setattr(analytics, "capture", broken)
+        def broken(targets):
+            raise RuntimeError("synthetic observer failure")
+        monkeypatch.setattr(analytics, "capture_quota_fail_open", broken)
     before = await _balance(clients)
     response = await clients.get(f"/call/{EP}?aweme_id=7")
     assert response.status_code == 200, response.text

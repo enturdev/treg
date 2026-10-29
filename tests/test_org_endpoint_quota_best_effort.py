@@ -74,6 +74,9 @@ async def test_outage_allows_limited_and_unconfigured_orgs_then_recovers(
     events = []
     monkeypatch.setattr(call_service.analytics, "capture", lambda distinct, event, properties=None, **kw:
                         events.append(properties) if event == "org_endpoint_quota_fail_open" else None)
+    monkeypatch.setattr(call_service.analytics, "enabled", lambda: True)
+    monkeypatch.setattr(call_service.analytics, "_ensure_flusher", lambda: None)
+    monkeypatch.setattr(call_service.analytics, "_quota_window", None)
     org_id = (await clients.get("/orgs")).json()[0]["org_id"]
     other = await funded_user(clients, "synthetic-quota-unrestricted@example.com")
     await put_rule(store, org=org_id, endpoint=EP, limit=0)
@@ -85,7 +88,7 @@ async def test_outage_allows_limited_and_unconfigured_orgs_then_recovers(
     assert (await clients.get(url)).status_code == 200
     assert (await clients.get(url, headers={"X-Treg-Token": other["token"]})).status_code == 200
     assert unavailable.await_count == 1
-    assert events == [{"admissions": 1, "target_count": 1}] * 2
+    assert events == []
     messages = [record.getMessage() for record in caplog.records
                 if record.name == "treg.org_endpoint_quota"]
     assert len(messages) == 1 and "allowing" in messages[0]
@@ -97,6 +100,15 @@ async def test_outage_allows_limited_and_unconfigured_orgs_then_recovers(
     assert (await clients.get(url)).status_code == 429
     assert (await clients.get(url, headers={"X-Treg-Token": other["token"]})).status_code == 200
     assert (await state(store, org=org_id, endpoint=EP))["used"] == 0
+    call_service.analytics._emit_quota_summary(force=True)
+    assert events == [{
+        "admissions": 3, "target_count": 3,
+        "target_examples": [
+            {"org_id": org_id, "endpoint_id": EP},
+            {"org_id": other["org_id"], "endpoint_id": EP},
+        ],
+        "targets_truncated": False,
+    }]
 
 
 async def test_uncertain_batch_is_admitted_once_without_extra_commit_or_retry(monkeypatch):
