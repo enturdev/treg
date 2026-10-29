@@ -453,20 +453,32 @@ async def auth_cli_approve(
 
 
 @app.get("/login", include_in_schema=False)
-async def login_page(request: Request, cli: str = "", treg_session: str = Cookie(default="")):
+async def login_page(request: Request, cli: str = "", ad: str = "", treg_session: str = Cookie(default="")):
     """The universal sign-in page `treg login` opens: reuses an existing dashboard session with one
     click ("Continue as …"), else offers every configured door — GitHub, Google, email one-time code.
-    The email door is always present, so login works even with no OAuth app configured."""
+    The email door is always present, so login works even with no OAuth app configured.
+
+    `ad` is the short install link's code (`signup.mint_ad_link`): the CLI sends it so the ad click
+    the landing page saw is restored as the `treg_ad` cookie HERE, in whichever browser opened this
+    page — an agent's embedded browser never held the landing page's cookie. Same shape and lifetime
+    as `adtrack.js` writes, and readable by it, so every downstream step (carry, stash, signup) is
+    unchanged. Unknown codes restore nothing."""
+    restored = await signup.ad_cookie_for_link(ad)
     if not cli:
-        return RedirectResponse("/app" + ("?" + request.url.query if request.url.query else ""),
+        resp = RedirectResponse("/app" + ("?" + request.url.query if request.url.query else ""),
                                 status_code=302)  # preserve incoming attribution for the SPA
-    if not _LOGIN_ID_RE.fullmatch(cli):
+    elif not _LOGIN_ID_RE.fullmatch(cli):
         return _auth_page("Login failed", "Bad login link. Run <code>treg login</code> again.", ok=False, status=400)
-    s = get_settings()
-    session_email = await auth_use_cases.cli_session_email(treg_session)
-    return HTMLResponse(_login_page_html(
-        cli, session_email=session_email,
-        github=bool(s.github_client_id), google=bool(s.google_client_id)))
+    else:
+        s = get_settings()
+        session_email = await auth_use_cases.cli_session_email(treg_session)
+        resp = HTMLResponse(_login_page_html(
+            cli, session_email=session_email,
+            github=bool(s.github_client_id), google=bool(s.google_client_id)))
+    if restored:
+        resp.set_cookie("treg_ad", restored, max_age=90 * 24 * 3600, path="/", samesite="lax",
+                        secure=_is_https(request), httponly=False)
+    return resp
 
 
 def _login_page_html(login_id: str, *, session_email: str | None, github: bool, google: bool) -> str:

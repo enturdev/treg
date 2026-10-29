@@ -1,6 +1,8 @@
 """Identity provisioning and first-team creation use cases."""
 
 import logging
+import re
+import secrets
 from datetime import timedelta
 from urllib.parse import quote, unquote
 
@@ -9,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
-from .. import adsconv, analytics, health, policy, sandbox as demo_sandbox
+from .. import adsconv, analytics, crypto, health, policy, ratestore, sandbox as demo_sandbox
 from ..config import get_settings
 from ..domain import money as ledger
 from ..domain import referrals
@@ -218,6 +220,44 @@ def _ad_attribution_from(raw_cookie: str) -> tuple[str, str, str]:
         # Old cookies were `CLICK_ID|landing` and always held a GCLID.
         click_field, click_id, landing = "gclid", first, rest
     return click_field, click_id.strip()[:255], landing.strip()[:64]
+
+
+# The short install link (`architecture/ads-conversions.md`, "Capture"): a code the copied command
+# carries in place of the cookie an agent's own browser never held.
+AD_LINK_NS = "ad_link"
+AD_LINK_TTL = timedelta(days=30)
+AD_LINK_RE = re.compile(r"[a-z0-9]{6}")
+AD_LINK_PER_ADDRESS = (30, 600.0)  # codes per client address per window (seconds)
+_AD_LINK_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"  # no 0/o/1/l/i: a human may retype it
+
+
+async def mint_ad_link(raw_cookie: str, *, address: str) -> str | None:
+    """A fresh code bound to the click in `raw_cookie`, or None when there is no usable click.
+    Raises `SignupError("too_many_links")` past the per-address limit."""
+    kind, click_id, landing = _ad_attribution_from(raw_cookie)
+    if not click_id:
+        return None
+    code = "".join(secrets.choice(_AD_LINK_ALPHABET) for _ in range(6))
+    per_address, window_s = AD_LINK_PER_ADDRESS
+    async with session_maker() as db:
+        if not await ratestore.rate_check(db, "ad_link_ip", [(address, per_address)], window_s):
+            await db.rollback()
+            raise SignupError("too_many_links")
+        await ratestore.sweep(db, AD_LINK_NS)
+        await ratestore.kv_put(db, AD_LINK_NS, crypto.hash_token(code),
+                               {"cookie": quote(f"{kind}|{click_id}|{landing}", safe="")},
+                               ttl_s=AD_LINK_TTL.total_seconds())
+        await db.commit()
+    return code
+
+
+async def ad_cookie_for_link(code: str) -> str:
+    """The cookie value a code stands for, or "" for an unknown, expired or malformed code."""
+    if not code or not AD_LINK_RE.fullmatch(code) or not adsconv.enabled():
+        return ""
+    async with session_maker() as db:
+        row = await ratestore.kv_get(db, AD_LINK_NS, crypto.hash_token(code))
+    return str((row or {}).get("cookie") or "")
 
 
 async def stash_ad_click(email: str, raw_cookie: str) -> None:

@@ -735,6 +735,23 @@
       "GET",
       "HEAD"
     ],
+    "name": "install_sh_linked",
+    "path": "/i/{code}"
+  },
+  {
+    "kind": "APIRoute",
+    "methods": [
+      "POST"
+    ],
+    "name": "ad_link_mint",
+    "path": "/i"
+  },
+  {
+    "kind": "APIRoute",
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
     "name": "selfhost_sh",
     "path": "/selfhost.sh"
   },
