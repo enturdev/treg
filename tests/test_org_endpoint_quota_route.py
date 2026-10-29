@@ -83,6 +83,50 @@ async def test_unavailable_quota_allows_the_primary_candidate_and_normal_charge(
     assert await _settled_ids() == {response.headers["X-Treg-Call-Id"] + ":r0"}
 
 
+async def test_confirm_keeps_first_hit_when_second_candidate_exhausts_quota(
+    clients, monkeypatch, verifiers_on,
+):
+    first, blocked = "tomba.people.email.find", "hunter.people.email.find"
+    attempts, used = _enable(monkeypatch, {FIND: 1, first: 1, blocked: 0})
+    seen = []
+    hunter_hit = (200, {"data": {"email": TOMBA_HIT[1]["data"]["email"], "score": 99,
+                                "verification": {"status": "valid"}}})
+    monkeypatch.setattr(call_service, "relay", _relay({
+        "tomba": [TOMBA_HIT], "hunter": [hunter_hit],
+    }, seen))
+    before = await _balance(clients)
+    response = await clients.post(f"/call/{FIND}", json=ASK, headers={
+        "X-Treg-Route-Confirm": "true", "X-Treg-Route-Prefer": "tomba,hunter",
+    })
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["output"]["email"] == TOMBA_HIT[1]["data"]["email"]
+    assert result["_treg"]["served_by"] == first
+    assert result["_treg"]["confirmation"] == {
+        "field": "email", "confirmed": False, "confirmed_by": None,
+    }
+    assert response.headers["X-Treg-Route-Confirmed"] == "false"
+    assert seen == ["tomba"]
+    assert attempts == {FIND: 1, first: 1, blocked: 1}
+    assert used[FIND] == used[first] == 1 and used[blocked] == 0
+    tried = result["_treg"]["tried"]
+    assert [(a["endpoint_id"], a["outcome"], a["charged_micro"]) for a in tried] == [
+        (first, "hit", TOMBA_FIND_PRICE), (blocked, "skipped", 0),
+    ]
+    assert int(response.headers["X-Treg-Cost-Micro"]) == TOMBA_FIND_PRICE
+    assert result["_treg"]["charged_micro"] == TOMBA_FIND_PRICE
+    assert before - await _balance(clients) == TOMBA_FIND_PRICE
+    call_id = response.headers["X-Treg-Call-Id"]
+    async with session_maker() as db:
+        assert (await db.execute(select(Hold))).scalars().all() == []
+        closes = (await db.execute(select(LedgerEntry).where(
+            LedgerEntry.kind.in_(["settle", "release"])))).scalars().all()
+    assert sorted((entry.call_id, entry.kind) for entry in closes) == [
+        (call_id + ":r0", "settle"), (call_id + ":r1", "release"),
+    ]
+
+
 @pytest.mark.parametrize("checker", [VERIFY, "tomba.people.email.verify"])
 @pytest.mark.parametrize("outcome", ["exceeded", "unavailable"])
 async def test_optional_checker_quota_policy_preserves_find_and_correct_settlement(
