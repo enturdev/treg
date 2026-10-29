@@ -5442,7 +5442,10 @@ def _catalog_search(query: str, args, cfg) -> None:
         view["routed"] = f"a treg.<job> id {_ROUTED_NOTE}; any other id is one provider"
     help_lines.insert(0, _GET_HELP)
     if body.get("total", 0) > len(rows):
-        help_lines.append(f"treg catalog search \"{query}\" --limit {min(body['total'], 100)}")
+        # the same search, words before `--new` (it takes a number), with more rows
+        again = ([shlex.quote(query.strip())] if query.strip() else []) + ([f"--new {days}"] if days is not None else []) \
+            + (["--sort newest"] if sort == "newest" else [])
+        help_lines.append(" ".join(["treg catalog search", *again, f"--limit {min(body['total'], 100)}"]))
     _emit(view, help_lines)
 
 

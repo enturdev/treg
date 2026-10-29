@@ -231,7 +231,7 @@ def _plan_row(c, cat) -> dict:
     per what the child bills, so a per-success one reads as billing no miss."""
     row = {"endpoint_id": c.endpoint["id"], "accepts": [list(v) for v in c.adapter.accepts],
            "usd": (c.price_micro / 1_000_000) if c.price_micro is not None else None,
-           "cost": catalog_store.cost_row(c.endpoint, cat)}
+           "cost": catalog_store.quote_cost(catalog_store.cost_row(c.endpoint, cat))}
     if c.hit_rate is not None:
         row["hit_rate"] = c.hit_rate
         row["usd_per_hit"] = c.expected_cost_per_hit / 1_000_000
@@ -688,7 +688,7 @@ async def catalog_endpoint(
             # The same job from providers whose adapter is not (yet) verified: not chosen by the
             # router, still callable by id — the search page groups them under this row, so the
             # page it points at must name them too.
-            "also": [{"endpoint_id": s["id"], "usd": ((s.get("cost") or {}).get("usd")), "cost": s.get("cost")}
+            "also": [{"endpoint_id": s["id"], "usd": ((s.get("cost") or {}).get("usd")), "cost": catalog_store.quote_cost(s.get("cost"))}
                      for s in siblings if s["id"] not in set(ep.get("routed_children") or [])],
             "headers": {"X-Treg-Route-Waterfall": "on by default: a miss tries the next provider; 0 = stop at the first miss",
                         "X-Treg-Route-Max-Cost": "USD ceiling for the whole call (default 1.00)",

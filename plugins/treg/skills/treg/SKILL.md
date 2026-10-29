@@ -91,9 +91,11 @@ treg call scrapecreators.reddit.subreddit.posts --query subreddit=news
 treg catalog request "<what you need>"                   # searched and it is not there: file it
 ```
 
-These commands print TOON: `key: value` lines, and tables as `name[N]{field,…}:` with one row per
-line. Commands (`call`, `help[N]`) print exactly as you type them; `param_examples` shows each
-parameter's own example, not a request to send. `treg --json …` prints the server's JSON instead.
+Bare `treg` and `treg catalog …` print TOON from CLI 0.28 on (earlier releases print tables):
+`key: value` lines, and tables as `name[N]{field,…}:` with one row per line. The `call` line and the
+`help[N]` commands print exactly as you type them; `param_examples` shows each parameter's own
+example, not a request to send; `--json` prints the server's JSON instead. `treg call` itself prints
+the provider's answer as it came; `treg --json call` wraps it (see "Scripting many calls" below).
 
 
 **For a common job, call the routed tool, not a provider you remember.** Scraping a page

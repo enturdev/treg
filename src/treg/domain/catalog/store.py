@@ -824,6 +824,24 @@ def cost_row(ep: dict, cat: Catalog) -> dict | None:
     return {k: v for k, v in cost.items() if k not in _COST_EVIDENCE} if cost else cost
 
 
+_QUOTE_COST = frozenset({"type", "value", "currency", "per", "unit", "usd", "usd_min", "varies", "display_usd",
+                         "display_unit", "display_prefix", "display_suffix", "rate_usd", "rate_usd_min", "rate_unit"})
+
+
+def quote_cost(cost: dict | None) -> dict | None:
+    """A cost as one line of a routed quote reads it: the price and its unit, not how it settles.
+    What every row would repeat is left out: `per` 1, a USD `value` (it is `usd`), and the `unit` of a
+    price per one of them (the `type` says it)."""
+    if not cost:
+        return cost
+    usd_native = cost.get("currency", "USD") == "USD" and cost.get("usd") is not None
+    per_one = (cost.get("per") or 1) == 1
+    return {k: v for k, v in cost.items() if k in _QUOTE_COST
+            and not (k == "per" and per_one)
+            and not (k in ("value", "currency") and usd_native)
+            and not (k == "unit" and per_one and cost.get("usd") is not None)}
+
+
 def sibling_view(ep: dict, provider_display: str, cat: Catalog) -> dict:
     """One row of an endpoint's comparison with the other providers of its job; the full view is
     that endpoint's own detail."""

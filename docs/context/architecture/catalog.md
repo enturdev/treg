@@ -2253,7 +2253,8 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   `X-Treg-Route-*` headers, listed once in the quote's `headers`. Never hand-written; not in any
   provider file.
   `catalog_get` on it returns the contract and the ranked **plan** (the quote) —
-  nothing is reserved. A child the router would not call on treg's key (paused, not
+  nothing is reserved. Each plan and `also` row carries `cost` as `store.quote_cost` cuts it: price and
+  unit only, without settlement detail or what every row would repeat. A child the router would not call on treg's key (paused, not
   `platform_eligible`, no key on this deployment) ranks after the rest with a `skipped` reason.
 - **Ranking** — `routing/plan.py`: own keys (tier 2) first at cost 0; then
   `expected_cost_per_hit = cost_at(request) × P(billed) / P(hit)` where `cost_at` prices *this*
