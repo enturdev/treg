@@ -6033,7 +6033,8 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
         help_lines.append(f"treg --json catalog get {e['id']} | jq .example_response   # the whole example")
     others = [row["id"] for row in view.get("compare") or [] if row["id"] != e["id"]]
     if others:
-        help_lines.append(f"treg catalog get {others[0]}   # the next way to do this job in compare")
+        help_lines.append(f"treg catalog get {others[0]}   # " + ("what letting treg pick the provider needs"
+                          if others[0].startswith("treg.") else "the next way to do this job in compare"))
     _emit(view, help_lines)
 
 
@@ -6279,8 +6280,13 @@ def _compare_view(e: dict, body: dict, cfg, limit: int) -> dict:
         return {}
     pinned = _pinned_provider(cfg, e.get("capability"))
     others = sorted((s for s in sibs if not pinned or s["provider"] == pinned), key=_compare_rank)
-    return {"compare_total": len(others) + 1 if len(others) + 1 > limit else None,
-            "compare_note": _COMPARE_NOTE, "compare": _compare_rows([e, *others][:limit]),
+    # The routed id rides second, under any limit: it is the other way to do this job, not one more
+    # provider to rank.
+    routed = [s for s in others if s.get("kind") == "routed"]
+    rows = [e, *routed, *(s for s in others if s.get("kind") != "routed")][:max(limit, 1 + len(routed))]
+    return {"compare_total": len(others) + 1 if len(others) + 1 > len(rows) else None,
+            "routed": f"{routed[0]['id']} {_ROUTED_NOTE}" if routed else None,
+            "compare_note": _COMPARE_NOTE, "compare": _compare_rows(rows),
             "pinned": _pinned_note(pinned, e.get("capability"))}
 
 

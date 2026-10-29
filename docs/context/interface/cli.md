@@ -545,7 +545,8 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   `also` row, so `/success` says a miss is free, followed by `~$N/call` when one call at the default
   size costs another amount, the plan row's `usd` that `X-Treg-Route-Max-Cost` is checked against;
   `_plan_price`), otherwise `compare` with a one-line `compare_note` (works is answered
-  without error, hit is found something), the endpoint itself and then the job's other providers,
+  without error, hit is found something), the endpoint itself, the job's routed id second under any
+  `--limit` (with a `routed` line saying what it is), and then the job's other providers,
   measured ones by success rate and price before the unmeasured, `--limit` rows (10 by default) with
   `compare_total` when there are more (`price`, `works` over `calls` (`_count`: exact under 1000, then
   `21k` or `1.6M`, the magnitude that weighs a rate), `hit`, `p50`, `last_ok_days` measured from the last real success, `verified` the
