@@ -6194,7 +6194,8 @@ def _params_view(inp: dict) -> dict:
     for r in rows:
         if r["_prose"]:
             counts.setdefault(r["_prose"], []).append(r["name"])
-    shared = {prose: names for prose, names in counts.items() if len(names) >= 3}
+    # A one-word note (`identity`) costs less on each row than a block that names the rows.
+    shared = {prose: names for prose, names in counts.items() if len(names) >= 3 and " " in prose}
     for r in rows:
         spec, parts = r.pop("_spec"), []
         prose = r.pop("_prose")
