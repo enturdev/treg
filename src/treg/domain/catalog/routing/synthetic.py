@@ -60,28 +60,26 @@ def routed_endpoint(contract: Contract, children: list[dict], adapters: dict[str
         "name": f"{cap} — routed: best of {len(kids)} providers, own keys first",
         "summary": contract.summary,
         "input": {"bodyType": "json", "body": body,
-                  "note": (f"Send everything you know about the subject — treg derives the rest (full_name ⇄ first+last), "
-                           f"matches each provider on the variants it accepts ({variants}) and sends each provider only "
-                           f"the fields it wants. "
-                           "On a miss treg keeps trying providers, cheapest first, within X-Treg-Route-Max-Cost "
-                           f"(default ${contract.default_max_cost_usd or 1.00:g} per call; misses on per-success providers are free). Options ride as "
-                           "headers, never in the body: X-Treg-Route-Waterfall: 0 (stop at the first miss), "
-                           "X-Treg-Route-Max-Cost: <usd>, X-Treg-Route-Prefer / X-Treg-Route-Exclude: <provider>. The "
-                           "response is {output, raw, _treg: {served_by, tried}}; X-Treg-Served-By names the child."
-                           + (f" X-Treg-Route-Verify: true checks a hit with {contract.check.endpoint} in the same call, "
-                              "at that call's own price, and reports it in _treg.verification "
-                              "{verdict, checked, served_by, cost_micro}." if contract.check else ""))},
+                  "note": ("Send what you know; treg sends each provider only the fields it accepts "
+                           f"({variants})"
+                           + (f" and fills {', '.join(sorted(contract.derive))} from the rest" if contract.derive else "")
+                           + ". On a miss it tries the next provider, cheapest first. Options are "
+                           "X-Treg-Route-* headers, never body fields. The answer is {output, raw, _treg}; "
+                           "X-Treg-Served-By names the provider."
+                           + (f" X-Treg-Route-Verify: true also checks a hit with {contract.check.endpoint}, "
+                              "at that call's own price, in _treg.verification." if contract.check else ""))},
         "test_request": {"body": {k: _EXAMPLE_VALUES.get(k, "…") for k in _best_variant(contract, kids, adapters)}} if contract.identity else {},
         "cost": {"type": "per_success", "value": lo, "currency": "USD", "per": 1, "unit": "call",
                  "source": "inferred", "confidence": "documented", "checked": None,
                  # No single quote is honest when children bill their misses: a $0 floor reads
                  # as "free". Quote nothing.
                  **({"varies": True} if billed_miss else {}),
-                 "note": ((("NOT free: misses are billed too. " if billed_miss else "")
-                           + f"the children's range ${lo:g}–${hi:g} per hit, 0% markup; you pay the child that served "
-                           f"AND every child tried before it that bills a miss ({len(billed_miss)} of {len(kids)} do), "
-                           f"up to X-Treg-Route-Max-Cost (default ${max_usd:g} a call). X-Treg-Route-Exclude them, or "
-                           "X-Treg-Route-Waterfall: 0, to pay for one provider only")
+                 "note": (("Not free: " if billed_miss else "")
+                          + f"${lo:g}–${hi:g} per hit across {len(kids)} providers, 0% markup"
+                          + (f". A call also pays each provider tried before the hit that bills a miss "
+                             f"({len(billed_miss)} of {len(kids)} do), up to X-Treg-Route-Max-Cost (default "
+                             f"${max_usd:g}); X-Treg-Route-Waterfall: 0 pays for one provider only"
+                             if billed_miss else "; misses are free")
                           if lo is not None else "children unpriced")},
         "miss_billed_by": billed_miss,
         "cost_range_usd": [lo, hi],

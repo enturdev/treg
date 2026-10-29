@@ -2246,8 +2246,11 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   per call or per result, whose provider bills an answer treg judges a miss: the caller pays those
   too, and the cost note says so). When `miss_billed_by` is non-empty the cost carries `varies:
   true` and `advertised_usd` quotes `usd_per_call: null`: the $0 floor of the range read as "free"
-  to an agent that then paid for hundreds of billed misses. The note leads with "NOT free" and
-  carries the range. Never hand-written; not in any
+  to an agent that then paid for hundreds of billed misses. The note leads with "Not free" and
+  carries the range, how many children bill a miss and the one-provider escape
+  (`X-Treg-Route-Waterfall: 0`); with none it says misses are free. The `input` note names the
+  identity variants, the fields `derive` fills (only when the contract has any) and that options are
+  `X-Treg-Route-*` headers, listed once in the quote's `headers`. Never hand-written; not in any
   provider file.
   `catalog_get` on it returns the contract and the ranked **plan** (the quote) —
   nothing is reserved. A child the router would not call on treg's key (paused, not
