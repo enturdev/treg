@@ -89,8 +89,11 @@ of rows becomes one `name[N]{field,…}:` table only when there are several and 
 its name (`cli_view.table` gives every row the same keys and leaves out a column that is null in
 every row). Commands and request values (`call`,
 `param_examples`, the `help[N]` list) print as typed, unquoted, so they copy without unescaping; a
-help line holding `: ` is the one that gets quoted. Consecutive one-line fields form a
-paragraph and each table or nested block its own, with a blank line between them. The whole output
+help line holding `: ` is the one that gets quoted. A view may name its groups of keys
+(`render(..., groups)`; `catalog get <id>` uses `_GET_GROUPS`: what it is, cost and call, route options,
+inputs, price table, response, alternatives, source): each group is one paragraph, a note beside its
+table. Without groups, consecutive one-line fields form a paragraph and each table or nested block its
+own. Paragraphs are separated by a blank line. The whole output
 decodes as TOON, which is how the tests read it. Nothing is clipped to fit a column: ids, prices, parameter names and notes
 print whole; only a list row's `name` is shortened (`_brief`), and `catalog get <id>` has the rest.
 A refusal is data too: `_fail` prints `error`, `message` and a `help` on stdout and exits 1

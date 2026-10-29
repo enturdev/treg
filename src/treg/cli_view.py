@@ -50,24 +50,34 @@ def _encode(value: dict[str, Any]) -> str:
     return "\n".join(encoder.lines)
 
 
-def render(view: dict[str, Any], help_lines: list[str] | None = None) -> str:
-    """Consecutive one-line fields form one paragraph; each table or nested block is its own,
-    with a blank line between paragraphs (valid TOON: a decoder skips them)."""
+def render(view: dict[str, Any], help_lines: list[str] | None = None,
+           groups: list[tuple[str, ...]] | None = None) -> str:
+    """With `groups`, each group of keys is one paragraph, in the groups' order; a key no group names
+    goes last. Without, consecutive one-line fields form one paragraph and each table or nested block
+    is its own. Paragraphs are separated by a blank line (valid TOON: a decoder skips them)."""
+    def text(key: str, value: Any) -> str:
+        return _verbatim(key, value) if key in VERBATIM_KEYS else _encode({key: value})
+
+    present = {k: v for k, v in view.items() if v is not None}
     paragraphs: list[str] = []
-    lines: list[str] = []
-    for key, value in view.items():
-        if value is None:
-            continue
-        text = _verbatim(key, value) if key in VERBATIM_KEYS else _encode({key: value})
-        if "\n" not in text:
-            lines.append(text)
-            continue
+    if groups:
+        named = {k for g in groups for k in g}
+        for group in [*groups, tuple(k for k in present if k not in named)]:
+            if block := [text(k, present[k]) for k in group if k in present]:
+                paragraphs.append("\n".join(block))
+    else:
+        lines: list[str] = []
+        for key, value in present.items():
+            rendered = text(key, value)
+            if "\n" not in rendered:
+                lines.append(rendered)
+                continue
+            if lines:
+                paragraphs.append("\n".join(lines))
+                lines = []
+            paragraphs.append(rendered)
         if lines:
             paragraphs.append("\n".join(lines))
-            lines = []
-        paragraphs.append(text)
-    if lines:
-        paragraphs.append("\n".join(lines))
     if help_lines:
         paragraphs.append("\n".join([f"help[{len(help_lines)}]:"]
                                     + [f"  - {_as_typed(line, list_item=True)}" for line in help_lines]))

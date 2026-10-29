@@ -875,8 +875,8 @@ def _ok(t: str) -> None: print(f"  {_G}✓{_R} {t}")
 def _dim(t: str) -> None: print(f"{_M}{t}{_R}")
 
 
-def _emit(view: dict, help_lines: list[str] | None = None) -> None:
-    print(cli_view.render_json(view, help_lines) if _JSON_OVERRIDE else cli_view.render(view, help_lines))
+def _emit(view: dict, help_lines: list[str] | None = None, groups: list[tuple[str, ...]] | None = None) -> None:
+    print(cli_view.render_json(view, help_lines) if _JSON_OVERRIDE else cli_view.render(view, help_lines, groups))
 
 
 def _fail(error: str, message: str, help_lines: list[str] | None = None, **details) -> NoReturn:
@@ -6043,8 +6043,23 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
         help_lines.append(f"treg --json catalog get {e['id']} | jq .example_response   # the whole example")
     if not routed and (others := [row["id"] for row in rows if row["id"] != e["id"]]):
         help_lines.append(f"treg catalog get {others[0]}   # the next way to do this job in compare")
-    _emit(view, help_lines)
+    _emit(view, help_lines, _GET_GROUPS)
 
+
+# `catalog get <id>` in the order an agent acts on it, one paragraph each: what it is; what it costs
+# and the call; a routed call's options; what to send; the response; the other ways to do the job;
+# where it comes from.
+_GET_GROUPS = [
+    ("id", "name", "summary", "job", "upstream"),
+    ("price", "native_price", "price_note", "overflow_price", "settle", "access", "call", "call_capped", "requires"),
+    ("route_headers",),
+    ("params_note", "params_shared", "params", "param_examples"),
+    ("price_table", "async"),
+    ("example_response", "example_more"),
+    ("routes_note", "routes", "also_total", "also"),
+    ("routed", "pinned", "compare_total", "compare_note", "compare"),
+    ("provider", "limits", "pricing", "docs", "verified", "added"),
+]
 
 EXAMPLE_FIELDS = 40
 
