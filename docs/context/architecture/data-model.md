@@ -66,6 +66,7 @@ sources:
   - src/treg/alembic/versions/0085_enterprise_sso_blocks.py
   - src/treg/alembic/versions/0087_rankings_snapshot.py
   - src/treg/alembic/versions/0088_call_usage_rollup.py
+  - src/treg/alembic/versions/0089_ledgerentry_settle_spend_index.py
   - src/treg/application/call_usage_rollup.py
   - src/treg/application/call_usage.py
   - tests/test_call_usage_rollup.py
@@ -385,7 +386,13 @@ uses this metadata, never the encrypted token's shape.
   `(org_id, id)`, and local runs, a sliver of a team's rows, read a partial
   `(org_id, created_at, id) WHERE kind = 'local_run'` (revision 0054); without them the first
   walked the primary key testing `org_id` and the second read the team's whole history. The
-  Activity feed's calls page by time on `(org_id, created_at)`.
+  Activity feed's calls page by time on `(org_id, created_at)`. A team's spend over a window
+  (`money.spend_since`, the Usage page and `/usage/by-tag` totals) reads a partial
+  `(org_id, created_at) INCLUDE (amount_micro) WHERE kind = 'settle'` on the ledger (revision 0089):
+  over `(org_id, created_at)` alone every row in the window cost a heap fetch, one random read per
+  row on a cold cache. The query states `'settle'` as a constant, since Postgres matches a partial
+  index only against one. A ledger too large to index within the revision's statement timeout gets
+  the same index built `CONCURRENTLY` out of band first; the revision then skips a valid one.
 
   **Spend per API key is the ledger's, folded the same way.** Revision 0070 adds `ApiKeySpendDay`
   (team + API key + tool + UTC day -> `spent_micro`, `charges`; primary key

@@ -372,7 +372,10 @@ quota gate. BYOK calls bypass it.
   `exhausted` until `resets_at`, or until the next sweep can prove otherwise.
 - **`sweep.py`** — `run_sweep(db)`: import policies → collect all providers in parallel (DB idle
   while the network is in flight) → one `CapacitySnapshot` per provider → publish each
-  `LatestState` to ratestore as `capacity:state:<provider>` (24 h TTL) → one commit. A note that
+  `LatestState` to ratestore as `capacity:state:<provider>` (24 h TTL) → one commit. The key is
+  the account's Settings slot spelling (`fiber_ai`); `state_key()` maps a catalog id (`fiber-ai`)
+  onto it through `platform_setting_name`, so the view and `clear_sweep_state` read the published
+  state under either spelling. A note that
   looks like a credential is withheld before it is stored. It never touches the call path's locks
   (`capacity:lock:*`): the meter it reads may not be the allowance that ran out.
 - **`marks.py`** - the call-path breaker, its own namespace `capacity:lock:<key>`; key = provider

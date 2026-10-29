@@ -1386,10 +1386,9 @@ def verify_event(payload: bytes, signature: str) -> dict:
     """Verify a Stripe webhook signature and return the parsed event. Raises `ValueError` on a bad
     signature or payload.
 
-    Uses the SDK's `verify_header` rather than our own HMAC (the demo feed's `pubfeed.verify_signature`
-    does it by hand): it is the code Stripe maintains, and it already handles the timestamp tolerance
-    that stops a captured delivery being replayed, plus the several-signatures case during secret
-    rotation.
+    Uses the SDK's `verify_header` rather than our own HMAC: it is the code Stripe maintains, and it
+    already handles the timestamp tolerance that stops a captured delivery being replayed, plus the
+    several-signatures case during secret rotation.
 
     Deliberately NOT `construct_event`, which additionally deserializes into the SDK's typed Event
     model and raises on an envelope it doesn't recognize. Authenticity and shape are separate

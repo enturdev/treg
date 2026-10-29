@@ -40,6 +40,13 @@ class RouteQualityCache:
         except asyncio.TimeoutError:
             return None
 
+    def warm(self, capabilities) -> None:
+        """Start reading each capability's file now, so the first routed call after a deploy is
+        ordered by quality rather than falling back to price while the read is still in flight."""
+        for capability in capabilities:
+            if capability not in self._cache and capability not in self._inflight:
+                self._inflight[capability] = asyncio.create_task(self._refresh(capability))
+
     async def _refresh(self, capability: str) -> quality.Snapshot | None:
         try:
             body = await self._fetch(capability)

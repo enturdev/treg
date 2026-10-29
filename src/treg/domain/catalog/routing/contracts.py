@@ -82,6 +82,10 @@ class Contract:
     # hit ranks ahead of how many keys it uses. Left false on searches, where `{title,
     # company_domain}` and `{company_domain}` are different questions.
     one_subject: bool = False
+    # The output fields a COMPLETE answer carries under `X-Treg-Route-Complete`: an answer missing
+    # any is weak, and an adapter that cannot map them all is asked last. Empty = more than half of
+    # the output fields, the generic rule. A profile without a headline is not a profile.
+    complete: tuple[str, ...] = ()
 
     @property
     def required_output(self) -> tuple[str, ...]:
@@ -232,8 +236,16 @@ def parse_contracts(doc: dict) -> dict[str, Contract]:
             confirm=_parse_confirm(cap, c.get("confirm"), c.get("output") or {}),
             empty_is_failure=bool(c.get("empty_is_failure", False)),
             one_subject=bool(c.get("one_subject", False)),
+            complete=_parse_complete(cap, c.get("complete"), c.get("output") or {}),
             **_parse_verdict(cap, c.get("verdict")))
     return out
+
+
+def _parse_complete(cap: str, raw, output: dict) -> tuple[str, ...]:
+    fields = tuple(str(k) for k in raw or ())
+    if unknown := [k for k in fields if k not in output]:
+        raise ValueError(f"contract {cap}: complete names fields outside its output: {', '.join(unknown)}")
+    return fields
 
 
 def _parse_check(cap: str, raw, output: dict) -> Check | None:

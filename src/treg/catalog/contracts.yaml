@@ -152,7 +152,7 @@ contracts:
       linkedin_handle: "linkedin_handle(linkedin_url)"
     filters: {}
     output:
-      phone: {type: str, required: true, note: "as the provider formats it; E.164 when it offers one, and +1 added to a 10-digit number the provider marks US or CA"}
+      phone: {type: str, required: true, note: "as the provider formats it; E.164 when it offers one, and +1 added to a 10-digit number the provider marks US or CA", analytics: key}
       line_type: {type: str, analytics: value}
       country_code: {type: str, analytics: value}
     miss: "phone == null"
@@ -453,6 +453,7 @@ contracts:
       about: {type: str}
       linkedin_url: {type: str}
     miss: "full_name == null"
+    complete: [full_name, headline, location]   # X-Treg-Route-Complete only
     idempotent: true
 
   linkedin.user.posts:

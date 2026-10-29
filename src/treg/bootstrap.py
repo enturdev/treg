@@ -274,11 +274,7 @@ _CONTROL_ROUTE_KEYS: frozenset[RouteKey] = frozenset({
     ('/onboard/team', ('POST',), 'onboard_team'),
     ('/demo/sandbox', ('POST',), 'demo_sandbox_mint'),
     ('/demo/sandbox/live', ('GET',), 'demo_sandbox_live'),
-    ('/stripe/webhook', ('POST',), 'stripe_webhook'),
-    ('/landing/stripe-feed', ('GET',), 'landing_stripe_feed'),
     ('/demo/sandbox/skill', ('GET',), 'demo_sandbox_skill'),
-    ('/skills/samples', ('GET',), 'skill_samples'),
-    ('/skills/{name}/install.sh', ('GET',), 'skill_install'),
     ('/onboard/seed-tool', ('POST',), 'onboard_seed_tool'),
     ('/onboard/accept-teammate', ('POST',), 'onboard_accept_teammate'),
     ('/invites/{invite_id}/accept', ('POST',), 'accept_my_invite'),
@@ -776,6 +772,9 @@ def _lifespan(role: AppRole):
                 logging.getLogger("treg").warning("event=route_quality_disabled", exc_info=True)
                 quality_reader = None
             routed_call.configure_route_quality_reader(quality_reader)
+            if quality_reader is not None:
+                from .domain.catalog import store as catalog_store
+                quality_reader.warm(catalog_store.load().contracts)
             mcp_reader_bound = role != "control" and _mcp is not None
             if mcp_reader_bound:
                 _mcp.configure_endpoint_observation_reader(endpoint_observations)

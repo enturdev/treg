@@ -1238,6 +1238,18 @@ body whose own `status` is 400 or more settles at zero; other missing, invalid, 
 evidence falls back to the normal estimate/miss rules. `reported_charge` is generic
 catalog metadata, not a provider-specific billing branch, and cannot be combined with `cost.settle`.
 
+A `per_result` cost says how its hold is sized with `cost.reserve`, because its `unit` cannot: a
+`keyword` may be one the caller asked about or one the provider returned. `reserve: {entities: {}}`
+holds per entity the request names. `reserve: {rows: {param, default: {value, source}, max}}` holds
+the caller's `param` (a declared integer `body.` or `queryParams.` field), else `default`, clamped
+to `max` and rounded up to whole `per` blocks; `source` (`docs` or `observed`) says where the
+default came from, because an unsourced default silently decides the hold.
+`cost.settle: {count: {path}}` then settles the length of that response list, capped at the hold;
+it needs `reserve`, `per: 1`, no `reported_charge`, and a list at `path` in the example. A
+`per_result` cost in an entity unit (`resolve._ENTITY_UNITS`) must declare `reserve`;
+`catalog_validate.UNDECLARED_RESERVE` lists the rows that still infer it from the unit, and only
+shrinks.
+
 A provider file, or one endpoint's `cost`, may declare `ceiling_param: {in: query, name, unit: usd}`.
 When the call has a caller ceiling and the caller did not send that query name, the call application
 appends it to the outbound query at the remaining ceiling in USD, so the provider refuses a dearer

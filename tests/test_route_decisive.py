@@ -171,6 +171,32 @@ async def test_quality_cache_serves_stale_and_survives_failures():
     assert calls == ["c", "c"] and await cache.get("c") is first, "a failed refresh keeps the last value"
 
 
+def test_a_file_may_lower_the_bar_but_not_below_the_floor():
+    row = {"decisive_rate": 0.5, "agreement": 0.9, "comparable": 40}
+    assert quality.rated(quality.parse({"slices": {"all": {"a": row}}}), "a", "all") is None, "default bar is 200"
+    assert quality.rated(quality.parse({"min_comparable": 30, "slices": {"all": {"a": row}}}), "a", "all").comparable == 40
+    low = quality.parse({"min_comparable": 5, "slices": {"all": {"a": {**row, "comparable": 20}}}})
+    assert quality.rated(low, "a", "all") is None, "never below the floor"
+    high = quality.parse({"min_comparable": 10_000, "slices": {"all": {"a": {**row, "comparable": 250}}}})
+    assert quality.rated(high, "a", "all") is not None, "a file cannot raise the bar above the default"
+
+
+async def test_a_warmed_cache_answers_the_first_call_without_waiting(monkeypatch):
+    from treg.infra import route_quality as infra_quality
+    calls = []
+
+    async def fetch(cap):
+        calls.append(cap)
+        return b'{"slices": {"all": {"a": {"decisive_rate": 1, "agreement": 1, "comparable": 300}}}}'
+
+    cache = RouteQualityCache(fetch, ttl_s=10)
+    cache.warm(["c", "d"])
+    await asyncio.sleep(0)
+    monkeypatch.setattr(infra_quality, "FIRST_READ_WAIT_S", 0.0)
+    assert (await cache.get("c"))["all"]["a"].comparable == 300
+    assert sorted(calls) == ["c", "d"], "each file is read once, at warm-up"
+
+
 class _Broken:
     def __init__(self):
         self.calls = 0

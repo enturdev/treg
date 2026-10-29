@@ -1559,46 +1559,11 @@
   {
     "kind": "APIRoute",
     "methods": [
-      "POST"
-    ],
-    "name": "stripe_webhook",
-    "path": "/stripe/webhook"
-  },
-  {
-    "kind": "APIRoute",
-    "methods": [
-      "GET",
-      "HEAD"
-    ],
-    "name": "landing_stripe_feed",
-    "path": "/landing/stripe-feed"
-  },
-  {
-    "kind": "APIRoute",
-    "methods": [
       "GET",
       "HEAD"
     ],
     "name": "demo_sandbox_skill",
     "path": "/demo/sandbox/skill"
-  },
-  {
-    "kind": "APIRoute",
-    "methods": [
-      "GET",
-      "HEAD"
-    ],
-    "name": "skill_samples",
-    "path": "/skills/samples"
-  },
-  {
-    "kind": "APIRoute",
-    "methods": [
-      "GET",
-      "HEAD"
-    ],
-    "name": "skill_install",
-    "path": "/skills/{name}/install.sh"
   },
   {
     "kind": "APIRoute",

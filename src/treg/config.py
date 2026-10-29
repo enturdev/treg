@@ -192,10 +192,6 @@ class Settings(BaseSettings):
 
     api_token: str = "dev-token"
 
-    # DEMO Stripe webhook signing secret (env TREG_DEMO_STRIPE_WEBHOOK_SECRET) for the landing page's live
-    # payments feed (see pubfeed.py). Empty = the /stripe/webhook endpoint is off (404).
-    demo_stripe_webhook_secret: str = ""
-
     # The Stripe sandbox restricted key (env TREG_DEMO_STRIPE_KEY) behind the landing sandbox's ONE
     # live wire: a sandbox call to the exact seeded stripe tool relays for real with THIS key
     # injected — the key never exists in any sandbox org (see sandbox.is_live_tool / api.call_tool).

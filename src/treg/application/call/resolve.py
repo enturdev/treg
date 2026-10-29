@@ -583,6 +583,21 @@ def _enforce_request_quantity(ep: dict, cost: dict, body: bytes, query) -> None:
         )
 
 
+def _reserved_rows(cost: dict, body: bytes, query) -> int:
+    """Rows a `cost.reserve.rows` price holds: the caller's value, else the declared default, at
+    most the declared max, rounded up to whole `per` blocks."""
+    rule = cost["reserve"]["rows"]
+    top = int(rule["max"])
+    values = _request_value(rule["param"], body, None, query if hasattr(query, "multi_items") else None)
+    raw = str(values[0]).strip() if len(values) == 1 else ""
+    if raw.isdigit():
+        n = top if len(raw) > len(str(top)) else max(1, min(int(raw), top))
+    else:
+        n = int(rule["default"]["value"])
+    per = int(cost.get("per") or 1)
+    return -(-n // per) * per
+
+
 def _platform_estimate_micro(cost: dict, query, body: bytes = b"") -> int:
     """What one call is expected to cost the platform, in RAW micro-USD (no margin — ledger.reserve
     applies that). Rounds UP: a fraction of a micro-dollar is not representable and must not round to
@@ -598,6 +613,9 @@ def _platform_estimate_micro(cost: dict, query, body: bytes = b"") -> int:
         n = _body_text_characters(body)
     elif cost.get("unit") == "utf8_byte":
         n = _body_text_utf8_bytes(body)
+    elif isinstance(cost.get("reserve"), dict):
+        n = (_reserved_rows(cost, body, query) if "rows" in cost["reserve"]
+             else _entity_count(query, body))
     elif cost.get("type") in ("per_result", "quota_rows") and cost.get("unit") in _ENTITY_UNITS:
         # Priced per INPUT entity, not per returned row: the page-size default below has no
         # meaning here. The request names how many entities it asks about.
