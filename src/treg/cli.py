@@ -6029,6 +6029,8 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
     help_lines = []
     if (view.get("compare_total") or view.get("also_total")) and e.get("capability"):
         help_lines.append(f"treg catalog get {e['capability']}   # every provider of this job")
+    if view.get("example_more"):
+        help_lines.append(f"treg --json catalog get {e['id']} | jq .example_response   # the whole example")
     others = [row["id"] for row in view.get("compare") or [] if row["id"] != e["id"]]
     if others:
         help_lines.append(f"treg catalog get {others[0]}   # the next way to do this job in compare")

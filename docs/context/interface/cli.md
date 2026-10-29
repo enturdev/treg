@@ -540,7 +540,7 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   literal (`param_examples`; together they are not a request), any `price_table` and
   `async` descriptor, the `example_response` (`_example_view`: about `EXAMPLE_FIELDS` values, each
   object's plain fields before its nested ones and a list's first item, with `example_more` linking the
-  whole example; it shows the shape, not data), then the alternatives: `routes` (the plan, in order) and
+  whole example and a help line reading it from `--json`; it shows the shape, not data), then the alternatives: `routes` (the plan, in order) and
   `also` on a routed id (each child priced per its unit from the `cost` the server puts on its plan or
   `also` row, so `/success` says a miss is free, followed by `~$N/call` when one call at the default
   size costs another amount, the plan row's `usd` that `X-Treg-Route-Max-Cost` is checked against;
