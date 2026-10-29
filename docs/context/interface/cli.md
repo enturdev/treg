@@ -554,9 +554,11 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   catalog's hand-run stamp). Provider limits, pricing and docs come last. `search`/`get` are matched as
   positional **verbs** inside `cmd_catalog`, not argparse subcommands, so `treg catalog <platform>`
   keeps working and a multi-word query needs no quoting. An id that is no endpoint but a job
-  (`treg catalog get people.search`, `_job_view`) lists every endpoint of that job, hidden kinds
-  included and the routed id ranked like any other, as `compare` ranks them, led by the routed id's
-  `call` when there is one (a ranked list alone sent weaker agents to its top row); an id that is both (a one-provider
+  (`treg catalog get people.search`, `_job_view`) answers as the job's routed id when it has one
+  (its plan already ranks the providers it routes to and `also` lists the rest; a second ranked list
+  sent weaker agents to its top row), otherwise lists every endpoint of the job, hidden kinds
+  included, as `compare` ranks them; the endpoint detail's help points at the routed id with
+  `--limit` to list every provider; an id that is both (a one-provider
   job) answers as the endpoint, and the endpoint detail's help points at its job when `compare` was
   cut short. An id that is neither is the `unknown_endpoint`
   error with the server's `did_you_mean` ids and the command for the first one, or a search built from

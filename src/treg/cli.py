@@ -5974,6 +5974,8 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
         _relay_json(r)
         return
     if r.status_code == 404 and (job := _job_view(endpoint_id, cfg)):
+        if isinstance(job, str):  # a job with a routed id: its plan already ranks the providers
+            return _catalog_get(job, cfg, limit=limit)
         _emit(*job)
         return
     if r.status_code == 404:
@@ -6027,15 +6029,20 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
         "added": e.get("added"),
     }
     help_lines = []
-    if (view.get("compare_total") or view.get("also_total")) and e.get("capability"):
-        help_lines.append(f"treg catalog get {e['capability']}   # every provider of this job")
+    rows = view.get("compare") if isinstance(view.get("compare"), list) else []
+    routed = e["id"] if e.get("kind") == "routed" else next((x["id"] for x in rows if x["id"].startswith("treg.")), None)
+    total = view.get("compare_total") or view.get("also_total")
+    more = f" --limit {total}" if total else ""
+    if routed and routed != e["id"]:
+        help_lines.append(f"treg catalog get {routed}{more}   # let treg pick the provider; its plan "
+                          f"and every other provider of this job")
+    elif total and e.get("capability"):
+        help_lines.append(f"treg catalog get {e['id']}{more}   # every provider of this job" if routed
+                          else f"treg catalog get {e['capability']}   # every provider of this job")
     if view.get("example_more"):
         help_lines.append(f"treg --json catalog get {e['id']} | jq .example_response   # the whole example")
-    rows = view.get("compare") if isinstance(view.get("compare"), list) else []
-    others = [row["id"] for row in rows if row["id"] != e["id"]]
-    if others:
-        help_lines.append(f"treg catalog get {others[0]}   # " + ("what letting treg pick the provider needs"
-                          if others[0].startswith("treg.") else "the next way to do this job in compare"))
+    if not routed and (others := [row["id"] for row in rows if row["id"] != e["id"]]):
+        help_lines.append(f"treg catalog get {others[0]}   # the next way to do this job in compare")
     _emit(view, help_lines)
 
 
@@ -6098,18 +6105,20 @@ def _requires(routing: dict | None) -> str | None:
     return None if not names else names[0] if len(names) == 1 else "one of " + " | ".join(names)
 
 
-def _job_view(job: str, cfg) -> tuple[dict, list[str]] | None:
-    """`catalog get <job>`: every provider of one job, ranked as `compare` ranks them, and the routed
-    id when treg can choose for the caller. None when no job has that id. An id that is both a job and
-    an endpoint (a one-provider job) is answered as the endpoint."""
+def _job_view(job: str, cfg) -> tuple[dict, list[str]] | str | None:
+    """`catalog get <job>`. A job with a routed id answers with that id, whose plan already ranks the
+    providers it routes to and lists the rest; a job without one gets every provider, ranked as
+    `compare` ranks them. None when no job has that id. An id that is both a job and an endpoint (a
+    one-provider job) is answered as the endpoint."""
     with _client(cfg, auth=False) as c:
         r = c.get(f"/catalog/platforms/{quote(job.split('.', 1)[0], safe='')}?include_hidden=1")
         cap = next((x for x in (_json_dict(r).get("capabilities") or []) if x.get("id") == job), None) \
             if r.status_code == 200 else None
         if not cap or not cap.get("endpoints"):
             return None
-        routed = next((x["id"] for x in cap["endpoints"] if x.get("kind") == "routed"), None)
-        d = c.get(f"/catalog/endpoints/{quote(routed or cap['endpoints'][0]['id'], safe='')}")
+        if routed := next((x["id"] for x in cap["endpoints"] if x.get("kind") == "routed"), None):
+            return routed
+        d = c.get(f"/catalog/endpoints/{quote(cap['endpoints'][0]['id'], safe='')}")
     if d.status_code != 200:
         return None
     body = d.json()
@@ -6117,15 +6126,10 @@ def _job_view(job: str, cfg) -> tuple[dict, list[str]] | None:
     pinned = _pinned_provider(cfg, job)
     ranked = sorted((x for x in members if not pinned or x["provider"] == pinned), key=_compare_rank)
     view = {"job": job, "does": cap.get("description"),
-            "call": body.get("call_template") if routed else None,
-            "routed": f"{routed} {_ROUTED_NOTE}; call it unless you need one provider's own fields"
-            if routed else None,
-            "providers": len({x["provider"] for x in ranked if x.get("kind") != "routed"}),
+            "providers": len({x["provider"] for x in ranked}),
             "pinned": _pinned_note(pinned, job),
             "compare_note": _COMPARE_NOTE, "compare": _compare_rows(ranked)}
-    help_lines = [f"treg catalog get {routed}   # what the routed call needs, its plan and route options"] \
-        if routed else []
-    return view, help_lines + [_GET_HELP]
+    return view, [_GET_HELP]
 
 
 def _access_detail(endpoint_id: str, cfg) -> str | None:
