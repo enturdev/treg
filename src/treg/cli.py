@@ -6031,7 +6031,8 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
         help_lines.append(f"treg catalog get {e['capability']}   # every provider of this job")
     if view.get("example_more"):
         help_lines.append(f"treg --json catalog get {e['id']} | jq .example_response   # the whole example")
-    others = [row["id"] for row in view.get("compare") or [] if row["id"] != e["id"]]
+    rows = view.get("compare") if isinstance(view.get("compare"), list) else []
+    others = [row["id"] for row in rows if row["id"] != e["id"]]
     if others:
         help_lines.append(f"treg catalog get {others[0]}   # " + ("what letting treg pick the provider needs"
                           if others[0].startswith("treg.") else "the next way to do this job in compare"))
@@ -6277,7 +6278,7 @@ def _compare_view(e: dict, body: dict, cfg, limit: int) -> dict:
                 "also": cli_view.table(also[:limit], ("id", "price")) or None}
     sibs = body.get("siblings") or []
     if not sibs:
-        return {}
+        return {"compare": f"no other provider does {e['capability']}"} if e.get("capability") else {}
     pinned = _pinned_provider(cfg, e.get("capability"))
     others = sorted((s for s in sibs if not pinned or s["provider"] == pinned), key=_compare_rank)
     # The routed id rides second, under any limit: it is the other way to do this job, not one more
