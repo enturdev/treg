@@ -1030,7 +1030,7 @@ def test_filters_reach_adapters_through_in_expr_and_array_bodies():
     assert cat.by_id["tomba.people.email.verify"]["path"] == "/v1/email-verifier"
     assert cost_at({"usd": 0.00179, "type": "per_result", "per": 1}, req) == 8_950, "priced at the requested limit"
     ep = cat.by_id["treg.google.keywords.ideas"]
-    assert ep["input"]["body"]["country"]["note"].startswith("filter — default 'us'")
+    assert ep["input"]["body"]["country"]["note"].startswith("filter; default 'us'")
 
 
 def test_a_contract_may_set_its_own_default_ceiling():

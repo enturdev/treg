@@ -12,7 +12,7 @@ import json
 from typing import Any
 
 TABLE_MAX_COLUMNS = 8
-VERBATIM_KEYS = frozenset({"call", "call_capped", "param_examples"})
+VERBATIM_KEYS = frozenset({"call", "param_examples"})
 
 
 def table(rows: list[dict[str, Any]], fields: tuple[str, ...]) -> list[dict[str, Any]]:

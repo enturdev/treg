@@ -532,19 +532,21 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   report (`POST /tool-requests`, `source: cli`). Open endpoint, rate-limited server-side; a configured
   token rides along as attribution only, never a requirement.
 - **`catalog get <endpoint-id>`** (`_catalog_get`) — the last stop before `treg call`
-  (`GET /catalog/endpoints/{id}`), in the order an agent acts on it: what it does, `upstream` (the
-  provider's method and path), `price` in USD with
+  (`GET /catalog/endpoints/{id}`), in the order an agent acts on it: what it does (`summary`, `name`
+  only without one), `upstream` (the provider's method and path), `price` in USD with
   `native_price` and the whole `price_note`, `access` (which credential would serve this caller), the
-  paste-ready `call` (the catalog's verified test request, the one runnable example), on a routed id
-  `call_capped` (the same call with `--header 'X-Treg-Route-Max-Cost: 0.05'`, so the way every
-  `route_headers` option is passed is shown) and `requires` (one of its contract's identity sets, since each identity param is optional alone), the
+  paste-ready `call` (the catalog's verified test request, the one runnable example; on a routed id it
+  carries `--header 'X-Treg-Route-Max-Cost: 0.05'`, so the way every `route_headers` option is passed
+  is shown), on a routed id `requires` (one of its contract's identity sets, since each identity param
+  is optional alone), the
   endpoint's own rule (`params_note`), prose three or more params share said once (`params_shared`),
   `params` by location with required first (`_params_view`), each param's own example as a JSON
   literal (`param_examples`; together they are not a request), any `price_table` and
   `async` descriptor, the `example_response` (`_example_view`: about `EXAMPLE_FIELDS` values, each
   object's plain fields before its nested ones and a list's first item, with `example_more` linking the
   whole example and a help line reading it from `--json`; it shows the shape, not data), then the alternatives: `routes` (the plan, in order) and
-  `also` on a routed id (each child priced per its unit from the `cost` the server puts on its plan or
+  `also` on a routed id (counted in `also_total` and listed only with `--limit`, since this page is how
+  to let treg choose; each child priced per its unit from the `cost` the server puts on its plan or
   `also` row, so `/success` says a miss is free, followed by `~$N/call` when one call at the default
   size costs another amount, the plan row's `usd` that `X-Treg-Route-Max-Cost` is checked against;
   `_plan_price`), otherwise `compare` with a one-line `compare_note` (works is answered
@@ -554,7 +556,9 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   measured ones by success rate and price before the unmeasured, `--limit` rows (10 by default) with
   `compare_total` when there are more (`price`, `works` over `calls` (`_count`: exact under 1000, then
   `21k` or `1.6M`, the magnitude that weighs a rate), `hit`, `p50`, `last_ok_days` measured from the last real success, `verified` the
-  catalog's hand-run stamp). Provider limits, pricing and docs come last. `search`/`get` are matched as
+  catalog's hand-run stamp). Provider limits, pricing and docs come last. A routed id omits what
+  restates its id or what its plan shows (`job`, `upstream`, `access`, `provider`); its `price` is the
+  plan's range. `search`/`get` are matched as
   positional **verbs** inside `cmd_catalog`, not argparse subcommands, so `treg catalog <platform>`
   keeps working and a multi-word query needs no quoting. An id that is no endpoint but a job
   (`treg catalog get people.search`, `_job_view`) answers as the job's routed id when it has one

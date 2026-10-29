@@ -5278,7 +5278,7 @@ def cmd_catalog(args, cfg) -> None:
         if not rest:
             sys.exit("which endpoint? e.g. treg catalog get tikhub.tiktok.video.comments\n"
                      "find one with: treg catalog search <query>")
-        return _catalog_get(rest[0], cfg, limit=getattr(args, "limit", None) or 10)
+        return _catalog_get(rest[0], cfg, limit=getattr(args, "limit", None))
     if args.platform == "request":
         return _catalog_request(" ".join(rest), cfg)
     if rest:
@@ -5966,7 +5966,7 @@ def _hub_view(e: dict) -> dict:
     }
 
 
-def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
+def _catalog_get(endpoint_id: str, cfg, *, limit: int | None = None) -> None:
     """One endpoint, everything about it — the last stop before `treg call`."""
     with _client(cfg, auth=False) as c:
         r = c.get(f"/catalog/endpoints/{quote(endpoint_id, safe='')}")
@@ -5999,10 +5999,14 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
     template = body["call_template"]
     if e.get("async") and "--await" not in template:
         template += " --await --timeout 900"
+    # A routed id is treg's own: its name, job, path and provider restate the id, and which providers
+    # can serve this caller is the plan's `skipped` column.
+    routed_id = e.get("kind") == "routed"
     view = head | {
-        "job": e.get("capability"),
-        "upstream": f"{e['method']} {e['path']}" if e.get("method") and e.get("path") else None,
-        "price": _cost_usd(cost) if cost else "not priced",
+        "name": None if routed_id or head.get("summary") else head.get("name"),
+        "job": None if routed_id else e.get("capability"),
+        "upstream": f"{e['method']} {e['path']}" if e.get("method") and e.get("path") and not routed_id else None,
+        "price": _routed_price(body) if routed_id else _cost_usd(cost) if cost else "not priced",
         # the provider's own number, behind the USD one; skipped when `_cost_usd` already fell back to it
         "native_price": _native_amount(cost["value"], cost["currency"])
         if cost.get("currency", "USD") != "USD" and cost.get("value") is not None and cost.get("usd") is not None else None,
@@ -6010,17 +6014,16 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
         "overflow_price": f"${e['overflow_price_usd']:g}/{e.get('overflow_price_unit') or 'call'} through "
                           f"{e.get('overflow_via')} when treg's own account for it is out"
         if e.get("overflow_price_usd") is not None else None,
-        "access": _access_detail(endpoint_id, cfg),
-        "call": template,
-        # how a route option is passed, shown on the call itself
-        "call_capped": _with_route_cap(template) if (body.get("routing") or {}).get("plan") else None,
+        "access": None if routed_id else _access_detail(endpoint_id, cfg),
+        # on a routed id, with a ceiling: how every route option is passed, shown on the call itself
+        "call": _with_route_cap(template) if routed_id else template,
         "requires": _requires(body.get("routing")),
         **_params_view(e.get("input") or {}),
         **_price_table_view(cost),
         "async": _async_view(e.get("async")),
         **_example_view(body.get("example_response"), e["id"], cfg),
         **_compare_view(e, body, cfg, limit),
-        "provider": f"{prov.get('display_name', e['provider'])} ({e['provider']})",
+        "provider": None if routed_id else f"{prov.get('display_name', e['provider'])} ({e['provider']})",
         "limits": prov.get("limits"),
         "pricing": prov.get("pricing_url"),
         "docs": e.get("docs_url") or prov.get("docs"),
@@ -6030,15 +6033,16 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
     }
     help_lines = []
     rows = view.get("compare") if isinstance(view.get("compare"), list) else []
-    routed = e["id"] if e.get("kind") == "routed" else next((x["id"] for x in rows if x["id"].startswith("treg.")), None)
-    total = view.get("compare_total") or view.get("also_total")
-    more = f" --limit {total}" if total else ""
-    if routed and routed != e["id"]:
-        help_lines.append(f"treg catalog get {routed}{more}   # let treg pick the provider; its plan "
-                          f"and every other provider of this job")
-    elif total and e.get("capability"):
-        help_lines.append(f"treg catalog get {e['id']}{more}   # every provider of this job" if routed
-                          else f"treg catalog get {e['capability']}   # every provider of this job")
+    routed = e["id"] if routed_id else next((x["id"] for x in rows if x["id"].startswith("treg.")), None)
+    if routed_id and view.get("also_total") and not view.get("also"):
+        help_lines.append(f"treg catalog get {e['id']} --limit {view['also_total']}   # the {view['also_total']} "
+                          f"providers of {e.get('capability')} treg does not route to, called by id")
+    elif routed and not routed_id:
+        total = view.get("compare_total")
+        help_lines.append(f"treg catalog get {routed}{f' --limit {total}' if total else ''}   # let treg pick the "
+                          f"provider; its plan and every other provider of this job")
+    elif view.get("compare_total") and e.get("capability"):
+        help_lines.append(f"treg catalog get {e['capability']}   # every provider of this job")
     if view.get("example_more"):
         help_lines.append(f"treg --json catalog get {e['id']} | jq .example_response   # the whole example")
     if not routed and (others := [row["id"] for row in rows if row["id"] != e["id"]]):
@@ -6051,7 +6055,7 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int = 10) -> None:
 # where it comes from.
 _GET_GROUPS = [
     ("id", "name", "summary", "job", "upstream"),
-    ("price", "native_price", "price_note", "overflow_price", "settle", "access", "call", "call_capped", "requires"),
+    ("price", "native_price", "price_note", "overflow_price", "settle", "access", "call", "requires"),
     ("route_headers",),
     ("params_note", "params_shared", "params", "param_examples"),
     ("price_table", "async"),
@@ -6288,13 +6292,16 @@ def _compare_view(e: dict, body: dict, cfg, limit: int) -> dict:
                  "skipped": c.get("skipped") or ("exhausted" if c.get("exhausted") else None)}
                 for c in routing["plan"]]
         also = [{"id": a["endpoint_id"], "price": _plan_price(a)} for a in routing.get("also") or []]
-        return {"routes_note": "the order a call tries, own keys first at call time; ~$/call is one call at "
-                               "the default size where it differs from the unit price, what "
-                               f"X-Treg-Route-Max-Cost is checked against, and limit changes it; {_METRICS_NOTE}",
+        per_call = any("~$" in (row["price"] or "") for row in plan)
+        # The providers it does not route to are listed only on request (`--limit`): this page is how
+        # to let treg choose, and a list of the others reads as a menu.
+        return {"routes_note": "the order a call tries, own keys first at call time; "
+                               + ("~$/call is one call at the default size, what X-Treg-Route-Max-Cost is checked "
+                                  "against, and limit changes it; " if per_call else "") + _METRICS_NOTE,
                 "routes": cli_view.table(plan, ("id", "price", "accepts", "works", "hit", "skipped")),
                 "route_headers": routing.get("headers") or None,
-                "also_total": len(also) if len(also) > limit else None,
-                "also": cli_view.table(also[:limit], ("id", "price")) or None}
+                "also_total": len(also) if also and (limit is None or len(also) > limit) else None,
+                "also": cli_view.table(also[:limit], ("id", "price")) or None if limit else None}
     sibs = body.get("siblings") or []
     if not sibs:
         return {"compare": f"no other provider does {e['capability']}"} if e.get("capability") else {}
@@ -6303,11 +6310,19 @@ def _compare_view(e: dict, body: dict, cfg, limit: int) -> dict:
     # The routed id rides second, under any limit: it is the other way to do this job, not one more
     # provider to rank.
     routed = [s for s in others if s.get("kind") == "routed"]
-    rows = [e, *routed, *(s for s in others if s.get("kind") != "routed")][:max(limit, 1 + len(routed))]
+    rows = [e, *routed, *(s for s in others if s.get("kind") != "routed")][:max(limit or 10, 1 + len(routed))]
     return {"compare_total": len(others) + 1 if len(others) + 1 > len(rows) else None,
             "routed": f"{routed[0]['id']} {_ROUTED_NOTE}" if routed else None,
             "compare_note": _COMPARE_NOTE, "compare": _compare_rows(rows),
             "pinned": _pinned_note(pinned, e.get("capability"))}
+
+
+def _routed_price(body: dict) -> str:
+    """A routed id's price: it varies with the provider that serves, so the range of its plan's unit
+    prices."""
+    usd = [u for row in (body.get("routing") or {}).get("plan") or []
+           if isinstance(u := (row.get("cost") or {}).get("usd", row.get("usd")), (int, float))]
+    return f"variable, ${min(usd):.3g}–${max(usd):.3g} per hit" if usd else "variable"
 
 
 def _plan_price(row: dict) -> str | None:

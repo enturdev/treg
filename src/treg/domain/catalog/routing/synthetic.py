@@ -40,10 +40,12 @@ def routed_endpoint(contract: Contract, children: list[dict], adapters: dict[str
     for variant in contract.identity:
         for k in variant:
             body.setdefault(k, {"type": contract.identity_types.get(k, "str"), "required": False,
-                                "note": f"identity key (part of {', '.join('+'.join(v) for v in contract.identity if k in v)})"})
+                                "note": "identity"})
     for k, spec in (contract.filters or {}).items():
         body.setdefault(k, {"type": (spec or {}).get("type", "str"), "required": False,
-                            "note": f"filter — default {(spec or {}).get('default')!r}" + (f"; {spec.get('note')}" if (spec or {}).get("note") else "")})
+                            "note": "; ".join(["filter"]
+                                              + ([f"default {spec['default']!r}"] if (spec or {}).get("default") is not None else [])
+                                              + ([spec["note"]] if (spec or {}).get("note") else []))})
     cap = contract.capability
     # The section its providers file under, so the platform page shows the row beside theirs.
     domains = [e["domain"] for e in children if e.get("domain")]
