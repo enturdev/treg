@@ -386,6 +386,9 @@
   @media (max-width: 860px) { #prompt .final-in, #prompt .final-in.field { padding: 40px 22px; } }
   #prompt .final-in, #prompt .final-in.field { background: #0E0B10; }
   #prompt .final-in > .paint { display: block; opacity: .6; filter: blur(60px) saturate(1.4) brightness(.5); }
+  #prompt .final-in, #prompt .final-in.field { background: #1B1B1A; }
+  #prompt .final-in > .paint { display: none; }
+  #prompt .copybox { background: #0F0F0E; -webkit-backdrop-filter: none; backdrop-filter: none; width: min(560px, 100%); box-sizing: border-box; }
   /* moves vs growth */
   #example .dots { display: inline-flex; gap: 4px; }
   #example .dots i { width: 10px; height: 10px; border-radius: 50%; background: rgba(16,16,16,.12); }
@@ -473,8 +476,7 @@
   .xr-pin > span { position: absolute; left: 0; bottom: 0; height: var(--h); display: flex; align-items: flex-start; gap: 6px; padding-left: 9px; box-shadow: inset 1.5px 0 0 rgba(16,16,16,.55); white-space: nowrap; font: 500 12px/1 var(--mono); transform-origin: bottom; transform: scaleY(0); animation: xrstem .5s cubic-bezier(.2,.8,.2,1) var(--d) forwards; }
   .xr-pin > span > * { opacity: 0; animation: xrfade .35s ease calc(var(--d) + .3s) forwards; }
   .xr-pin > span img { width: 20px; height: 20px; padding: 3px; box-sizing: border-box; border-radius: 6px; background: #fff; box-shadow: 0 1px 0 rgba(16,16,16,.12); margin-top: -4px; }
-  .xr-pin b { position: relative; z-index: 2; font-weight: 500; background: var(--ink); color: #fff; padding: 5px 8px; border-radius: 6px; margin-top: -8px; }
-  .xr-pin.key b { background: var(--hot); }
+  .xr-pin b { position: relative; z-index: 2; font-weight: 500; background: #fff; color: #101010; box-shadow: 0 0 0 1px #E4E1DA, 0 4px 10px -6px rgba(16,16,16,.3); padding: 5px 8px; border-radius: 6px; margin-top: -8px; }
   .xr-pin em { font-style: normal; color: rgba(16,16,16,.55); margin-top: -2px; }
   @keyframes xrpop { to { transform: scale(1); } }
   @keyframes xrstem { to { transform: scaleY(1); } }
@@ -535,15 +537,17 @@
   .xr-run .rdemo .infl { fill: rgba(17,132,83,.10); } .xr-run .rdemo .infl-t { fill: #0E6B43; }
 
   /* the three steps: each card shows its step */
-  #plays .st3 { max-width: 1080px; margin: 0 auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+  #plays .st3 { max-width: 1080px; margin: 0 auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 56px; }
   .st3 article { background: #F5F4F1; border-radius: 22px; padding: 8px; display: flex; flex-direction: column; transition: transform .35s cubic-bezier(.2,.8,.2,1); }
+  .st3 article { position: relative; }
+  .st3 article:not(:last-child)::after { content: "→"; position: absolute; z-index: 2; top: calc(50% - 17px); right: -45px; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: #101010; color: #fff; font: 600 17px/1 var(--ui); box-shadow: 0 0 0 4px #fff; }
   .st3 article:hover { transform: translateY(-3px); }
   .st-v { position: relative; height: 220px; border-radius: 16px; background: #fff; box-shadow: 0 0 0 1px #E9E7E2; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 18px; box-sizing: border-box; }
   .st-t { padding: 18px 14px 14px; text-align: left; }
-  .st-t .n { font: 500 12px var(--mono); color: #118453; }
+  .st-t .n { display: block; font: 800 44px/1 var(--ui); letter-spacing: -.04em; color: #101010; }
   .st-t h3 { margin: 6px 0 4px; font: 600 21px/1.2 "Inter Tight", var(--ui); letter-spacing: -.03em; color: #101010; }
   .st-t p { margin: 0; font-size: 14.5px; color: #6E6A62; }
-  .v1 .fld { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 250px; padding: 12px 14px; border-radius: 12px; background: #fff; box-shadow: 0 0 0 1.5px #101010, 0 10px 24px -16px rgba(16,16,16,.4); font: 500 16px var(--mono); color: #101010; box-sizing: border-box; }
+  .v1 .fld { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 250px; padding: 12px 14px; border-radius: 12px; background: #fff; font: 500 16px var(--mono); color: #101010; box-sizing: border-box; }
   .v1 .fld img { width: 22px; height: 22px; }
   .v1 .ty { display: inline-block; width: 0; overflow: hidden; white-space: nowrap; }
   .v1 .car { width: 2px; height: 18px; background: #118453; animation: rdblink 1s steps(1) infinite; }
@@ -554,6 +558,7 @@
   #plays.in .v1 .rng { animation: stup .5s ease 1.8s forwards; }
   @keyframes sttype { to { width: 11ch; } }
   @keyframes stup { to { opacity: 1; transform: none; } }
+  .st-v { background: none; box-shadow: none; }
   .st-net { width: 100%; height: 100%; overflow: visible; }
   .st-net .ln line { stroke: #118453; stroke-width: 1.2; stroke-dasharray: 2 6; stroke-linecap: round; opacity: .55; }
   #plays.in .st-net .ln line { animation: stflow 1.1s linear infinite; }
@@ -561,7 +566,7 @@
   .st-net .nd circle { fill: #fff; stroke: #E9E7E2; }
   .st-net .nd { opacity: 0; transform-box: fill-box; transform-origin: center; transform: scale(.4); transition: opacity .4s, transform .5s cubic-bezier(.3,1.6,.5,1); transition-delay: calc(var(--i) * 70ms); }
   #plays.in .st-net .nd { opacity: 1; transform: none; }
-  .st-net .hub { fill: #fff; stroke: #101010; stroke-width: 1.5; }
+  .st-net .hub { fill: #fff; filter: drop-shadow(0 4px 8px rgba(16,16,16,.14)); }
   .st-net .pulse { fill: none; stroke: #118453; stroke-width: 2; transform-box: fill-box; transform-origin: center; opacity: 0; }
   #plays.in .st-net .pulse { animation: stping 2s ease-out .8s infinite; }
   @keyframes stping { 0% { transform: scale(.9); opacity: .7; } 100% { transform: scale(2.2); opacity: 0; } }
@@ -571,16 +576,16 @@
   .st-mini { width: 100%; height: 58px; overflow: visible; }
   .st-mini .ar { fill: rgba(17,132,83,.08); }
   .st-mini .cv { fill: none; stroke: #118453; stroke-width: 2.5; stroke-dasharray: 1; stroke-dashoffset: 1; }
-  .st-mini circle { fill: #fff; stroke: #101010; stroke-width: 2.5; opacity: 0; }
+  .st-mini circle { fill: #118453; opacity: 0; }
   #plays.in .st-mini .cv { animation: stdraw 1.4s cubic-bezier(.45,0,.35,1) .4s forwards; }
   #plays.in .st-mini circle { animation: stup .3s ease forwards; } #plays.in .st-mini circle:nth-of-type(1) { animation-delay: .8s; } #plays.in .st-mini circle:nth-of-type(2) { animation-delay: 1s; } #plays.in .st-mini circle:nth-of-type(3) { animation-delay: 1.4s; }
   @keyframes stdraw { to { stroke-dashoffset: 0; } }
   .v3 ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
-  .v3 li { display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: 8px; background: #F5F4F1; font: 500 12.5px var(--ui); color: #101010; opacity: 0; transform: translateY(6px); }
+  .v3 li { display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: 8px; background: #fff; font: 500 12.5px var(--ui); color: #101010; opacity: 0; transform: translateY(6px); }
   .v3 li b { color: #118453; font-weight: 600; }
   .v3 li em { margin-left: auto; font: 500 10.5px var(--mono); font-style: normal; color: #8A8885; }
   #plays.in .v3 li { animation: stup .4s ease forwards; } #plays.in .v3 li:nth-child(1) { animation-delay: 1.7s; } #plays.in .v3 li:nth-child(2) { animation-delay: 1.9s; } #plays.in .v3 li:nth-child(3) { animation-delay: 2.1s; }
-  @media (max-width: 860px) { #plays .st3 { grid-template-columns: 1fr; max-width: 420px; } }
+  @media (max-width: 860px) { #plays .st3 { grid-template-columns: 1fr; max-width: 420px; } .st3 article:not(:last-child)::after { content: "↓"; top: auto; right: auto; bottom: -45px; left: calc(50% - 17px); } }
   @media (prefers-reduced-motion: reduce) {
     .st3 *, .st3 *::before { animation: none !important; transition: none !important; }
     .v1 .ty { width: 11ch; } .v1 .rng, .st-net .nd, .st-mini circle, .v3 li { opacity: 1; transform: none; } .st-mini .cv { stroke-dashoffset: 0; }
@@ -594,7 +599,8 @@
   #example .bp-hd h2::after { display: none; }
   .bp-sub { margin: 10px 0 0; font-size: 16px; color: #6E6A62; }
   .bp-sub b { color: #118453; font-weight: 600; }
-  .bp-tl { background: #fff; border-radius: 20px; box-shadow: 0 0 0 1px #E9E7E2, 0 24px 60px -40px rgba(20,18,12,.3); padding: 22px 22px 12px; }
+  .bp-card { background: #fff; border-radius: 20px; box-shadow: 0 0 0 1px #E9E7E2, 0 24px 60px -40px rgba(20,18,12,.3); padding: 22px 22px 26px; }
+  .bp-tl { padding: 0 0 12px; }
   .bp-svg { display: block; width: 100%; height: auto; overflow: visible; font-family: var(--mono); }
   .bp-svg .cv { fill: none; stroke: #118453; stroke-width: 2.5; }
   .bp-svg .ar { fill: url(#bpF); }
@@ -682,7 +688,7 @@
   .bp-more summary:hover, .bp-rc summary:hover { background: #E9E7E2; }
   .bp-rc { margin-top: 40px; } .bp-rc summary b { color: #118453; } .bp-rc[open] summary { margin-bottom: 16px; }
   #example .bp-plays .pl .ev { display: none; }
-  @media (max-width: 760px) { .bp-tl { overflow-x: auto; padding: 16px 12px 8px; } .bp-svg { min-width: 720px; } }
+  @media (max-width: 760px) { .bp-card { padding: 16px 12px 18px; } .bp-tl { overflow-x: auto; padding: 0 0 8px; } .bp-svg { min-width: 720px; } }
   @media (max-width: 900px) { .tks, #example .bp-plays .pls { grid-template-columns: minmax(0, 1fr); } .tk-ev { height: 260px; } .bp-tabs button { padding: 9px 12px; font-size: 14px; } .bp-tabs .lg { display: none; } }
   .howweb .sn { margin: 0 auto; max-width: 760px; font-size: clamp(18px, 2vw, 22px); line-height: 1.7; color: rgba(255,255,255,.75); text-align: center; text-wrap: balance; }
   .howweb .sn .nw, .howweb .sn .lg { white-space: nowrap; }
@@ -730,7 +736,6 @@
   }
   .xr-pin.sm-only { display: none; }
   .xr-pin.flip > span { left: auto; right: 0; padding: 0 9px 0 0; flex-direction: row-reverse; box-shadow: inset -1.5px 0 0 rgba(16,16,16,.55); }
-  .xr-pin.key b { background: #118453; }
   /* over the hero the bar is see-through, so the hero's gradient runs to the top; it frosts once the page scrolls */
   .nav.light:not(.scrolled) { background: transparent; border-bottom-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
   .nav.light.scrolled { background: rgba(253,252,251,.82); -webkit-backdrop-filter: blur(14px) saturate(1.4); backdrop-filter: blur(14px) saturate(1.4); border-bottom-color: rgba(16,16,16,.06); }
@@ -800,19 +805,19 @@
         <div class="fld"><img src="media/growth-rea/brands/lovable.svg" alt=""><span class="ty">lovable.dev</span><i class="car"></i></div>
         <div class="rng"><span>Sep 2024</span><b>→</b><span>Oct 2026</span></div>
       </div>
-      <div class="st-t"><span class="n">01</span><h3>Name + time period in</h3><p>Any company, any window.</p></div>
+      <div class="st-t"><span class="n">Step 1</span><h3>Name + time period in</h3><p>Any company, any window.</p></div>
     </article>
     <article>
       <div class="st-v v2"><svg class="st-net" viewBox="0 0 320 200" aria-hidden="true"><g class="ln"><line x1="200.8" y1="27.7" x2="160" y2="100" style="--i:0"/><line x1="266.8" y1="55.3" x2="160" y2="100" style="--i:1"/><line x1="292.0" y1="100.0" x2="160" y2="100" style="--i:2"/><line x1="266.8" y1="144.7" x2="160" y2="100" style="--i:3"/><line x1="200.8" y1="172.3" x2="160" y2="100" style="--i:4"/><line x1="119.2" y1="172.3" x2="160" y2="100" style="--i:5"/><line x1="53.2" y1="144.7" x2="160" y2="100" style="--i:6"/><line x1="28.0" y1="100.0" x2="160" y2="100" style="--i:7"/><line x1="53.2" y1="55.3" x2="160" y2="100" style="--i:8"/><line x1="119.2" y1="27.7" x2="160" y2="100" style="--i:9"/></g><g class="nd" style="--i:0"><circle cx="200.8" cy="27.7" r="16"/><image href="logos/dataforseo.svg" x="191.8" y="18.7" width="18" height="18"/></g><g class="nd" style="--i:1"><circle cx="266.8" cy="55.3" r="16"/><image href="logos/predictleads.svg" x="257.8" y="46.3" width="18" height="18"/></g><g class="nd" style="--i:2"><circle cx="292.0" cy="100.0" r="16"/><image href="logos/cloro.svg" x="283.0" y="91.0" width="18" height="18"/></g><g class="nd" style="--i:3"><circle cx="266.8" cy="144.7" r="16"/><image href="logos/meta-ad-library.svg" x="257.8" y="135.7" width="18" height="18"/></g><g class="nd" style="--i:4"><circle cx="200.8" cy="172.3" r="16"/><image href="logos/google-ads.svg" x="191.8" y="163.3" width="18" height="18"/></g><g class="nd" style="--i:5"><circle cx="119.2" cy="172.3" r="16"/><image href="logos/linkedin.svg" x="110.2" y="163.3" width="18" height="18"/></g><g class="nd" style="--i:6"><circle cx="53.2" cy="144.7" r="16"/><image href="logos/x-mono.svg" x="44.2" y="135.7" width="18" height="18"/></g><g class="nd" style="--i:7"><circle cx="28.0" cy="100.0" r="16"/><image href="logos/youtube.svg" x="19.0" y="91.0" width="18" height="18"/></g><g class="nd" style="--i:8"><circle cx="53.2" cy="55.3" r="16"/><image href="media/aeo/logos/reddit.png" x="44.2" y="46.3" width="18" height="18"/></g><g class="nd" style="--i:9"><circle cx="119.2" cy="27.7" r="16"/><image href="logos/tinyfish.svg" x="110.2" y="18.7" width="18" height="18"/></g><circle class="pulse" cx="160" cy="100" r="24"/><rect class="hub" x="136" y="76" width="48" height="48" rx="13"/><image href="logos/treg.svg" x="146" y="86" width="28" height="28"/></svg></div>
-      <div class="st-t"><span class="n">02</span><h3>treg collects every signal</h3><p>Traffic, search, AI answers, ads, posts, links, hiring.</p></div>
+      <div class="st-t"><span class="n">Step 2</span><h3>treg collects every signal</h3><p>Traffic, search, AI answers, ads, posts, links, hiring.</p></div>
     </article>
     <article>
       <div class="st-v v3" aria-hidden="true">
         <div class="bp-h"><img src="media/growth-rea/brands/lovable.svg" alt="">Lovable · growth blueprint</div>
-        <svg class="st-mini" viewBox="0 0 280 74" aria-hidden="true"><path class="ar" d="M0,70 C40,69 60,66 90,52 C120,38 140,36 170,30 C200,24 225,8 250,6 C262,5 272,14 280,20 L280,74 L0,74 Z"/><path class="cv" pathLength="1" d="M0,70 C40,69 60,66 90,52 C120,38 140,36 170,30 C200,24 225,8 250,6 C262,5 272,14 280,20"/><circle cx="62" cy="64" r="4.5"/><circle cx="98" cy="48" r="4.5"/><circle cx="196" cy="24" r="4.5"/></svg>
+        <svg class="st-mini" viewBox="0 0 280 74" aria-hidden="true"><path class="ar" d="M0,70 C40,69 60,66 90,52 C120,38 140,36 170,30 C200,24 225,8 250,6 C262,5 272,14 280,20 L280,74 L0,74 Z"/><path class="cv" pathLength="1" d="M0,70 C40,69 60,66 90,52 C120,38 140,36 170,30 C200,24 225,8 250,6 C262,5 272,14 280,20"/><circle cx="62" cy="64" r="6"/><circle cx="98" cy="48" r="6"/><circle cx="196" cy="24" r="6"/></svg>
         <ul><li><b>✓</b>Badge on every app<em>Share</em></li><li><b>✓</b>Post your numbers<em>Noticed</em></li><li><b>✓</b>Pages AI reads<em>Noticed</em></li></ul>
       </div>
-      <div class="st-t"><span class="n">03</span><h3>Growth blueprint out</h3><p>What worked, when, and how to copy it.</p></div>
+      <div class="st-t"><span class="n">Step 3</span><h3>Growth blueprint out</h3><p>What worked, when, and how to copy it.</p></div>
     </article>
   </div>
 </section>
@@ -820,11 +825,12 @@
 <section class="section" id="example">
   <div class="bp">
     <header class="bp-hd">
-      <p class="bp-k">The output</p>
+      <p class="bp-k">The showcase</p>
       <h2>Lovable’s growth blueprint</h2>
       <p class="bp-sub">Sep 2024 → Oct 2026 · every number pulled through treg, the main run for <b>$0.58</b></p>
     </header>
     <p class="bp-swipe" aria-hidden="true">Swipe the timeline →</p>
+    <div class="bp-card">
     <div class="bp-tl"><svg class="bp-svg" viewBox="0 0 1100 582" role="img" aria-label="lovable.dev Google visits a month, Sep 2024 to Oct 2026, with every dated move by channel">
       <defs><linearGradient id="bpF" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#118453" stop-opacity=".18"/><stop offset="1" stop-color="#118453" stop-opacity="0"/></linearGradient></defs>
       <text class="lt" x="12" y="30">Google visits</text><text class="lt sm" x="12" y="46">a month, US est.</text>
@@ -836,6 +842,7 @@
     </svg></div>
     <div class="bp-tabs" role="tablist"><button type="button" role="tab" data-t="soc" aria-selected="true"><span class="lg"><img src="logos/x-mono.svg" alt=""><img src="logos/youtube.svg" alt=""></span>Social media</button><button type="button" role="tab" data-t="ads" aria-selected="false"><span class="lg"><img src="logos/meta-ads.svg" alt=""><img src="logos/google-ads.svg" alt=""></span>Ads</button><button type="button" role="tab" data-t="seo" aria-selected="false"><span class="lg"><img src="media/aeo/logos/google.svg" alt=""><img src="media/aeo/logos/chatgpt.svg" alt=""></span>SEO / AEO</button></div>
     <div class="bp-panel" data-p="soc" role="tabpanel"><p class="bp-note">Each post came right before Google visits grew faster.</p><div class="tks"><article class="tk"><div class="tk-ev"><div class="ev-post"><header><img src="media/growth-rea/out/anton-osika.jpg" alt=""><b>Anton Osika</b><span>@antonosika · Mar 11, 2025</span></header><p>Lovable’s growth increased by almost 50% last week, <mark>now adding 1,500 customers per day</mark></p><img class="pi fit" src="media/growth-rea/out/x-1500-chart.jpg" alt="" loading="lazy"><footer><b>376K</b> views · 1.5K likes</footer></div></div><div class="tk-tx"><span class="tk-n">01</span><h4>Post your growth numbers</h4><p>“1,500 customers a day” drew <b>376K views</b>.</p><small>X · Mar 2025</small></div></article><article class="tk"><div class="tk-ev"><div class="ev-post"><header><img src="media/growth-rea/out/arman-hezarkhani.jpg" alt=""><b>Arman Hezarkhani</b><span>@ArmanHezarkhani · Jan 16, 2026</span></header><p><mark>The Complete Lovable Presentation Guide</mark></p><img class="pi" src="media/growth-rea/out/x-arman-cover.jpg" alt="" loading="lazy"><footer><b>805K</b> views · 779 likes</footer></div></div><div class="tk-tx"><span class="tk-n">02</span><h4>Get creators to teach one use case</h4><p>A creator’s Lovable presentation guide drew <b>805K views</b>.</p><small>X · Jan 2026</small></div></article><article class="tk"><div class="tk-ev"><div class="ev-post"><header><img src="media/growth-rea/out/anton-osika.jpg" alt=""><b>Anton Osika</b><span>@antonosika · Jan 26, 2026</span></header><p>A Lovable user built a pet-portrait service. <mark>The app is now making $100k/month.</mark></p><img class="pi" src="media/growth-rea/out/x-pet-1.jpg" alt="" loading="lazy"><footer><b>817K</b> views · 5.9K likes</footer></div></div><div class="tk-tx"><span class="tk-n">03</span><h4>Share your users’ money stories</h4><p>A user’s $100k/month app is their <b>most-liked post</b>.</p><small>X · Jan 2026</small></div></article></div></div><div class="bp-panel" data-p="ads" role="tabpanel" hidden><div class="tks"><article class="tk"><div class="tk-ev"><div class="ev-ads"><img src="media/growth-rea/out/ad-pt-1.jpg" alt="" loading="lazy"><img src="media/growth-rea/out/ad-pt-2.jpg" alt="" loading="lazy"><img src="media/growth-rea/out/ad-pt-3.jpg" alt="" loading="lazy"></div></div><div class="tk-tx"><span class="tk-n">01</span><h4>Open a new country with local ads</h4><p>Their <b>4 most-seen</b> Meta ads are in Portuguese and land on <code>/pt-br/</code>.</p><small>90 most-seen Meta ads · 29 Oct 2026</small></div></article><article class="tk"><div class="tk-ev"><div class="ev-cap"><p>“With Lovable, you just describe what you want. AI turns it into a working product…”</p><div class="ev-ads"><img src="media/growth-rea/out/ad-en-1.jpg" alt="" loading="lazy"><img src="media/growth-rea/out/ad-en-2.jpg" alt="" loading="lazy"><img src="media/growth-rea/out/ad-en-3.jpg" alt="" loading="lazy"></div></div></div><div class="tk-tx"><span class="tk-n">02</span><h4>Keep one caption, test many visuals</h4><p><b>72 of their 90</b> top ads run on just 2 captions.</p><small>90 most-seen Meta ads · 29 Oct 2026</small></div></article><article class="tk"><div class="tk-ev"><div class="ev-ads two"><figure><img src="media/growth-rea/out/ad-cr-1.jpg" alt="" loading="lazy"><figcaption>a site for a Thai grocery store</figcaption></figure><figure><img src="media/growth-rea/out/ad-cr-2.jpg" alt="" loading="lazy"><figcaption>ChatGPT + Lovable</figcaption></figure></div></div><div class="tk-tx"><span class="tk-n">03</span><h4>Pay creators to build on camera</h4><p><code>#lovablepartner</code> creators make a real site in the video.</p><small>Meta ad library · 29 Oct 2026</small></div></article></div></div><div class="bp-panel" data-p="seo" role="tabpanel" hidden><div class="tks"><article class="tk"><div class="tk-ev"><div class="ev-badge"><div class="win w0"><i class="bar"><b></b><b></b><b></b><span>pilchago.lovable.app</span></i><img src="media/growth-rea/out/app-pilchago.jpg" alt="" loading="lazy"><i class="mini">Edit with ♥</i></div><div class="win w1"><i class="bar"><b></b><b></b><b></b><span>fragrancesfinder.lovable.app</span></i><img src="media/growth-rea/out/app-fragrancesfinder.jpg" alt="" loading="lazy"><i class="mini">Edit with ♥</i></div><div class="win w2"><i class="bar"><b></b><b></b><b></b><span>marketeria.lovable.app</span></i><img src="media/growth-rea/out/app-marketeria.jpg" alt="" loading="lazy"><i class="mini">Edit with ♥</i></div><div class="big"><span class="bg">Edit with <img src="media/growth-rea/brands/lovable.svg" alt=""><b>Lovable</b><i>×</i></span><small>↳ links every app back to lovable.dev</small></div></div></div><div class="tk-tx"><span class="tk-n">01</span><h4>Put a badge on every app users publish</h4><p><b>20,132 sites</b> now link back through “Edit with Lovable”.</p><small>Backlinks · DataForSEO</small></div></article><article class="tk"><div class="tk-ev"><ul class="ev-aff"><li><span>topai.tools</span><i>→</i><code>?via=<b>topaitools</b></code></li><li><span>bento.me</span><i>→</i><code>?via=<b>giovanna</b></code></li><li><span>madewithlovable.com</span><i>→</i><code>?via=<b>julien</b></code></li><li><span>programmercave.com</span><i>→</i><code>?via=<b>programmercave</b></code></li><li><span>news.unbeat.ai</span><i>→</i><code>?via=<b>unbeatai</b></code></li></ul></div><div class="tk-tx"><span class="tk-n">02</span><h4>Pay affiliates to link to you</h4><p><b>918 sites</b> now link in with an affiliate <code>?via=</code> code.</p><small>Backlinks · DataForSEO · 29 Oct 2026</small></div></article><article class="tk"><div class="tk-ev"><div class="ev-ai"><div class="gd"><span>lovable.dev/guides/</span><b>lovable-vs-bolt-vs-v0</b></div><div class="gd"><span>lovable.dev/guides/</span><b>bolt-vs-replit-vs-lovable</b></div><p class="res">ChatGPT: “best AI app builder for a non-technical founder?”</p><ol><li class="me"><img src="media/growth-rea/brands/lovable.svg" alt="">Lovable</li><li>Bubble</li><li>Replit</li></ol></div></div><div class="tk-tx"><span class="tk-n">03</span><h4>Publish “X vs Y” comparison guides</h4><p>ChatGPT now names them first in <b>3 of 3</b> buyer questions, citing these guides.</p><small>ChatGPT, 3 questions · cloro</small></div></article></div></div>
+    </div>
     <div class="bp-plays" id="lovable-plays">
       <div class="bp-ph"><h3>Copy these plays</h3><button type="button" class="pill dark" id="copyPlaybook">Copy the playbook</button></div>
       <div class="pls"><article class="pl">
@@ -925,7 +932,7 @@
       <a class="pill" href="https://github.com/superdesigndev/treg" target="_blank" rel="noopener">Open source</a>
     </div>
     <div class="ctas" id="webCtas" hidden>
-      <a class="pill light" href="https://studio.sharenow.today/" target="_blank" rel="noopener">Try it on sharenow</a>
+      <a class="pill light" href="https://sharenow.today/treg/" target="_blank" rel="noopener">Try it on sharenow</a>
     </div>
   </div>
 </section>
