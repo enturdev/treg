@@ -9,6 +9,7 @@ sources:
   - tests/test_cli_key_compatibility.py
   - src/treg/routers/auth_helpers.py
   - src/treg/cli_analytics.py
+  - src/treg/cli_session.py
   - src/treg/convert.py
   - src/treg/agents.py
   - src/treg/routers/api_keys.py
@@ -102,8 +103,10 @@ received, a 404 included; a view the CLI builds itself (home, a refusal) keeps i
 which only the TOON view leaves out. A routed row's price is `variable` (`_cost_usd` on `cost.varies`): its
 children's misses are billed, so it is never shown as free. `_client` sends `X-Treg-Client-Version`
 (the CLI release) beside `X-Treg-Client`; `tool_called` records it as `client_version`, so an output
-change can be compared across the releases in use. Like every `x-treg-*` header, it never reaches the
-upstream.
+change can be compared across the releases in use. With telemetry on (below) it also sends
+`X-Treg-Session` and `X-Treg-Agent`, which `tool_called` records as `session` (64 characters at most)
+and `agent` (32), so the calls of one agent task can be joined. Like every `x-treg-*` header, none of
+them reaches the upstream.
 
 ## Pasted-key connect
 
@@ -677,18 +680,40 @@ stored token when a deliberate team switch succeeds.
 ## Anonymous CLI analytics
 
 `main` calls `cli_analytics.track_command` after dispatch, including failures and interrupts.
-The PostHog Python SDK sends `cli_command_completed` with the handler's fixed command name,
-exit code, success, duration in milliseconds, package version and OS. Help/version flags and
-argument parsing failures exit before dispatch and emit nothing. No arguments, request/response
-bodies, paths, tokens, emails or team identifiers are collected. A random UUID in `analytics-id`
-beside `TREG_CONFIG` identifies an installation; it is independent of login/logout.
+The PostHog Python SDK sends `cli_command_completed` with the command name, exit code, success,
+duration in milliseconds, package version, OS, `session` and `agent`. The command name is the
+handler's, except that `catalog` records its form: `catalog_search`, `catalog_get`, `catalog_job`
+(an id `_job_view` answers, or redirects to its routed id), `catalog_platform` and
+`catalog_request`; bare `catalog` stays `catalog`. Commands add fixed-vocabulary fields through
+`_note`: `error` is the code `_fail` printed, `status_class` (`2xx`, `4xx`, `5xx`) is `call`'s first
+answer, and `tool` is the id given to `call` or `catalog get`, kept only when it has an endpoint
+id's shape. A usage error (argparse exit 2) is sent as `usage_error` with `options`, the
+unrecognized option names without their values (`-X` for `-Xvalue`, `--flag` for `--flag=value`).
+Help and version flags exit 0 before dispatch and emit nothing. No other argument, query,
+request/response body, path, token, email or team identifier is collected. A random UUID in
+`analytics-id` beside `TREG_CONFIG` identifies an installation; it is independent of login/logout.
+
+`cli_session.current` resolves the session once per invocation, standard library only:
+`TREG_SESSION_ID` as given (hashed when it is not a short plain token); else the nearest agent on
+the process tree, found by walking at most eight parents (libproc on macOS, `/proc` on Linux,
+nothing elsewhere) past shells and wrappers. Agent variables are inherited by nested agents, so the
+tree decides which agent is nearest (process name, or `CLAUDE_PID` naming the ancestor, since a
+native Claude Code runs under a version-named executable) and only then is that agent's own
+variable read: `CLAUDE_CODE_SESSION_ID` for Claude Code, `CODEX_THREAD_ID` for Codex. Without one
+(Gemini CLI and OpenCode expose none) the session is the agent's process, or the nearest
+non-wrapper ancestor: its pid and start time. With no readable tree, an id in `session-id` beside
+`TREG_CONFIG` is reused while it was last used under 30 minutes ago. Every id derived from the
+machine is sent as `sha256(agent:raw)` cut to 16 hex characters, never raw. `agent` is
+`claude-code`, `codex`, `gemini-cli`, `opencode`, `human` (no agent and a terminal on stdin and
+stdout) or `unknown`; with no readable tree, a single agent's variables present in the environment
+still name it.
 
 The public treg.to ingestion token is the default only for the hosted registry and its legacy
 alias. Self-hosted URLs send nothing unless `TREG_CLI_POSTHOG_KEY` is set; the host override is
-`TREG_CLI_POSTHOG_HOST` (default EU ingestion). `TREG_TELEMETRY=0` or `DO_NOT_TRACK=1` disables
-all analytics and ID creation. SDK import and synchronous capture run in a daemon thread with
-no retries, a 0.2-second request timeout and a 1-second caller wait budget. Slow delivery may
-be dropped at exit; telemetry failures are silent and preserve command output and exit status.
+`TREG_CLI_POSTHOG_HOST` (default EU ingestion). `TREG_TELEMETRY=0|false|off` or `DO_NOT_TRACK=1`
+disables all analytics, ID creation, the process walk and the two session headers. SDK import and
+synchronous capture run in a daemon thread with no retries, a 0.2-second request timeout and a
+1-second caller wait budget. Slow delivery may be dropped at exit; telemetry failures are silent and preserve command output and exit status.
 
 ## Catalog price display
 
