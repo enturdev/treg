@@ -270,6 +270,7 @@ _CONTROL_ROUTE_KEYS: frozenset[RouteKey] = frozenset({
     ('/oauth/grants', ('GET',), 'oauth_grants'),
     ('/oauth/grants/{family_id}/team', ('POST',), 'oauth_grant_set_team'),
     ('/orgs', ('GET',), 'list_orgs'),
+    ('/home', ('GET',), 'home'),
     ('/orgs/{org_id}/invites', ('POST',), 'create_invite'),
     ('/invites/accept', ('POST',), 'accept_invite'),
     ('/invites/mine', ('GET',), 'my_invites'),

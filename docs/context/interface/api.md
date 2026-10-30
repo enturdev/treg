@@ -413,7 +413,13 @@ shared HTTP client. `/auth/logout` remains an HTTP-only cookie action.
   each org carries a `tool_count` - one grouped query - so the dashboard can land on the org with tools;
   its `active` flag follows `require_member`'s precedence - per-org membership token, else `X-Treg-Org`,
   else a team-pinned identity token's own `org` claim - so `treg login --token <pinned key>` lands on the
-  baked-in team instead of the caller's first membership);
+  baked-in team instead of the caller's first membership); `home` (`GET /home`) is bare `treg` in one
+  read: account, active team and role, the `/orgs` team count, balance (an auto top-up trigger, as the
+  balance route is), own tool names (`access.usable_tools`, the same filter `/tools` applies) and the
+  catalog's headline size (the catalog read off the event loop, the counts cached per loaded catalog). A member (an agent key included) answers in full; a signed-in user whose
+  team does not resolve (`require_member` raises the typed `access.NoTeam`: no team chosen, one
+  the user has left, or the bootstrap token before team setup) answers with
+  `team: null`; every other refusal of `require_member` is returned as it is;
   invites via `create_invite` (`POST /orgs/{id}/invites`, admin+) → one-time code (**emailed** via
   `email.send_invite`, best-effort, along with a separate inbox-only `email_token` sign-in link - the
   token is never in the JSON response; see the invite sign-in link below), `accept_invite`
