@@ -31,6 +31,12 @@ related:
 
 # Web Arena
 
+Brave Search joins Search and News Search through their verified adapters. Its LLM context,
+image, video, and place endpoints have different result semantics from the Arena tasks. Brave's
+response-retention rule means a completed run keeps only aggregate result counts and quality
+scores for Brave attempts; result links and bodies remain available in the live response but are
+not saved in the run record. The card explains this when the result is a hit.
+
 `/web-arena` is one standalone Vue page; the old `/web-arena/leaderboard` path redirects there.
 The page shares Enrich Arena's tokens, type, light canvas, fighter sprites, and dialogs, with its
 own layout. There is no page navigation: the brand links home and the page is the arena. The
@@ -63,8 +69,8 @@ TinyFish and Crawl4AI have no count request field. A Search quote can include th
 first page; Web Arena compares at most the first ten returned links. Other Search providers
 must send the ten-result limit upstream or enforce a fixed ten-result page. Spider Search uses
 listing-only mode so its search does not fetch the result pages.
-News Search combines verified news endpoints from TinyFish, Search1API, Exa, AnyAPI, Serper,
-Cloro, SerpAPI, DataForSEO, LiteScrape, and Tavily. TinyFish, Search1API, Exa, and Tavily use
+News Search combines verified news endpoints from Brave Search, TinyFish, Search1API, Exa, AnyAPI, Serper,
+Cloro, SerpAPI, DataForSEO, LiteScrape, and Tavily. Brave Search, TinyFish, Search1API, Exa, and Tavily use
 the `web.search.news` catalog contract; the others use `google.serp.news`. LiteScrape fixes
 Google's `nws` vertical, and Tavily fixes its `news` topic with basic depth and usage evidence.
 Paper Search joins Exa and TinyFish publications with Serper Scholar. YouTube Search compares

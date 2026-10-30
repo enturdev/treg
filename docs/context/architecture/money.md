@@ -1128,8 +1128,10 @@ still pay the provider twice.
   Neither a global nor an org-wide key safely separates independent callers.
 - A short application transaction claims a pending row before relay. The unique constraint
   arbitrates concurrent claims; the loser gets 409. Reusing a label with another fingerprint is 422.
-- Metered successes retain status, body, charge and call id for 24 hours. Uncharged failures
-  (every routed failure since routed children defer their holds to the parent, catalog.md), BYOK
+- Metered successes retain status, body, charge and call id for 24 hours. A catalog endpoint with
+  `response_retention: forbidden` instead keeps a body-free 410 receipt with the call id and charge,
+  including for BYOK, so the same key cannot repeat the provider call. Uncharged failures (every
+  routed failure since routed children defer their holds to the parent, catalog.md), other BYOK
   calls and owned free polls release the label immediately, so a retry tries again.
 - Replays return `X-Treg-Idempotent-Replay: true`, `X-Treg-Cost-Micro: 0` (nothing new was charged,
   so a client summing the header stays right) and the first call's figure in

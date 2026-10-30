@@ -924,7 +924,10 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
             try:
                 await _store_idempotent(idem_key, caller, status_code=response.status,
                                         body=await _drain(response), media_type="application/json",
-                                        charged_micro=charged, metered=True, call_ref=call_ref)
+                                        charged_micro=charged,
+                                        metered=True, call_ref=call_ref,
+                                        response_retention_forbidden=_response_retention_forbidden(
+                                            (request.context.route_summary or {}).get("served_by")))
             except asyncio.CancelledError:
                 await _finish_cancelled_call(request, None, call_ref)
                 raise
@@ -1037,6 +1040,9 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                                "cache_ttl_policy": "adaptive",
                                "cache_rollout_percent": get_settings().archive_serve_percent}
 
+    def _retention_forbidden() -> bool:
+        return _response_retention_forbidden(mk.endpoint_id if mk else None)
+
     def _capture(props: dict) -> None:
         analytics.capture(audit_email, "tool_called", props | cache_diagnostics |
                           {"archive_body_write": get_settings().archive_body_write},
@@ -1104,7 +1110,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
             }
         # Failed own-key and own-tool calls retain the same redacted, admin-only evidence as
         # marketplace failures. Successes remain empty and `/calls` never exposes these columns.
-        if error_request or error_response:
+        if (error_request or error_response) and not _retention_forbidden():
             telemetry |= {"error_request": error_request, "error_response": error_response}
         audit.record_call(
             org_id=audit_org_id, user_email=audit_email, tool_name=audit_tool,
@@ -1120,8 +1126,9 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                 "async_submit" if async_submission else "call",
                 org_id=audit_org_id, endpoint_id=mk.endpoint_id, call_ref=call_ref,
                 query_items=request.query_params.multi_items(), request_body=caller_body,
-                answer_status=status_code, answer_body=answer_body,
-                answers_allowed=caller.org.archive_opt_out_at is None,
+                answer_status=status_code,
+                answer_body=None if _retention_forbidden() else answer_body,
+                answers_allowed=caller.org.archive_opt_out_at is None and not _retention_forbidden(),
                 client=_client_name(request), provider=mk.provider, credential_tier=mk.tier,
                 status_code=status_code, refused_by=refused_by, hit=hit, verdict=verdict,
                 cached=served_hit, cost_estimated_micro=mk.estimate_micro or None,
@@ -1288,7 +1295,9 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
             try:
                 await _store_idempotent(idem_key, caller, status_code=response.status, body=body,
                                         media_type=_response_header(response, "content-type"),
-                                        charged_micro=charged, metered=True, call_ref=call_ref)
+                                        charged_micro=charged,
+                                        metered=True, call_ref=call_ref,
+                                        response_retention_forbidden=_retention_forbidden())
             except asyncio.CancelledError:
                 await _finish_cancelled_call(
                     request, mk, call_ref, response, trusted_org_id=caller_org)
@@ -1855,10 +1864,11 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                 await _store_idempotent(idem_key, caller, status_code=response.status, body=body,
                                         media_type=_response_header(response, "content-type"),
                                         charged_micro=charged,
-                                        # A streamed or spooled body is not kept for replay: a
-                                        # retry calls the provider again.
+                                        # A streamed or spooled body is not kept for replay. A
+                                        # forbidden-retention response keeps a 410 receipt instead.
                                         metered=not streaming_free_result and spooled_bytes is None,
-                                        call_ref=call_ref)
+                                        call_ref=call_ref,
+                                        response_retention_forbidden=_retention_forbidden())
             except asyncio.CancelledError:
                 await _finish_cancelled_call(request, mk, call_ref, response)
                 raise
@@ -1903,12 +1913,13 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
            response_bytes=len(body) if free_poll else None,
            error_request=err_request, error_response=err_response)
     if idem_key:
-        # Unmetered: nothing was billed, so there is nothing to protect. Dropping the claim frees the
-        # label at once instead of making the caller wait out the window to reuse it.
+        # An own-key call is not charged by treg, but a provider that forbids retaining responses
+        # may still bill its owner. Keep a body-free receipt so the same key cannot repeat it.
         try:
             await _store_idempotent(idem_key, caller, status_code=response.status, body=b"",
                                     media_type="", charged_micro=0, metered=False,
-                                    call_ref=call_ref)
+                                    call_ref=call_ref,
+                                    response_retention_forbidden=_retention_forbidden())
         except asyncio.CancelledError:
             await _finish_cancelled_call(request, mk, call_ref, response)
             raise
@@ -1919,6 +1930,11 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
         if smoothed:
             _set_response_header(response, "X-Treg-Smoothed", " ".join(smoothed))
     return response
+
+
+def _response_retention_forbidden(endpoint_id: str | None) -> bool:
+    entry = catalog_store.load().by_id.get(endpoint_id or "")
+    return bool(entry and entry.get("response_retention") == "forbidden")
 
 
 def _routed_event(request: _ApplicationRequest, ep: dict, status: int, *,
@@ -1936,8 +1952,9 @@ def _routed_event(request: _ApplicationRequest, ep: dict, status: int, *,
     call_event_app.emit(
         "call", org_id=request.caller.org_id, endpoint_id=ep["id"], capability=ep.get("capability"),
         call_ref=request.context.call_ref, identity=summary.get("identity"),
-        output=summary.get("output"),
-        answers_allowed=request.caller.org.archive_opt_out_at is None,
+        output=None if _response_retention_forbidden(summary.get("served_by")) else summary.get("output"),
+        answers_allowed=request.caller.org.archive_opt_out_at is None
+        and not _response_retention_forbidden(summary.get("served_by")),
         client=_client_name(request), provider="treg", credential_tier="routed",
         status_code=status, refused_by=refused_by, hit=summary.get("hit"),
         verdict=summary.get("verdict"), cost_charged_micro=charged,

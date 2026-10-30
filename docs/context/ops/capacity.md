@@ -55,6 +55,14 @@ related:
 
 # Provider capacity
 
+Brave Search publishes no API-key-readable credit or usage endpoint. `NO_BALANCE_API` reports
+the prepaid account as dashboard-only; operators read credits and usage in Brave's dashboard.
+The catalog records the documented 50 requests per second, and provider 429 responses still
+flow through the ordinary capacity handling. No automatic dollar threshold can be inferred
+from dashboard-only data.
+`_KNOWN` records the dashboard's enabled auto-reload setting as a manual observation, and
+`_RATE_LIMITS` paces the shared key at the documented 50 requests per second.
+
 Every platform-key slot is either on `BALANCE_ROUTES` (a free collector reads its balance) or on
 `NO_BALANCE_API` (with the reason none exists), under the slot's spelling;
 `test_every_platform_key_has_a_balance_decision` fails a new slot that is on neither. A sweep
