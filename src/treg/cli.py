@@ -501,6 +501,29 @@ def _wants_browser_check(r) -> bool:
     return r.status_code == 400 and r.headers.get("X-Treg-Captcha") == "required"
 
 
+# `install.sh` fetched as `/i/<code>` leaves the code in this file; login sends it back as `ad=`.
+_AD_LINK_RE = re.compile(r"[a-z0-9]{6}")
+
+
+def _ad_link_path() -> Path:
+    return CONFIG_PATH.parent / "ad-link"
+
+
+def _pending_ad_link() -> str:
+    try:
+        value = _ad_link_path().read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    return value if _AD_LINK_RE.fullmatch(value) else ""
+
+
+def _forget_ad_link() -> None:
+    try:
+        _ad_link_path().unlink()
+    except OSError:
+        pass
+
+
 def cmd_login(args, cfg) -> None:
     if args.token:  # agent / CI: a token directly (a per-org token, or a dashboard identity token)
         # A typed human Default/bootstrap is still an identity credential and may participate in
@@ -592,7 +615,8 @@ def cmd_login(args, cfg) -> None:
     # The code rides in the URL FRAGMENT (never sent to the server, so it stays out of request logs):
     # the /login page displays it for a visual match against this terminal instead of making the user
     # type it. The server still validates the code at approve time — the guard itself is unchanged.
-    url = f"{base}/login?cli={lid}" + (f"#code={code}" if code else "")
+    ad_link = _pending_ad_link()
+    url = f"{base}/login?cli={lid}" + (f"&ad={ad_link}" if ad_link else "") + (f"#code={code}" if code else "")
     # flush=True for non-TTY agent shells where stdout is block-buffered — the pairing code must
     # appear immediately so an agent driving a browser can see and verify it.
     print(f"Opening your browser to sign in…\nIf it doesn't open, visit:\n  {url}\n", flush=True)
@@ -615,6 +639,8 @@ def cmd_login(args, cfg) -> None:
             if d.get("active_org"):
                 cfg["active_org"] = d["active_org"]  # the team the user picked in the browser
             _save_config(cfg)  # persist first; the login_id is single-use, don't risk losing it
+            if ad_link:
+                _forget_ad_link()
             if not cfg.get("active_org"):
                 _pick_active_org(cfg)  # older server (no picker) — falls back to guessing, and pins
             else:
