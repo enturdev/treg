@@ -453,6 +453,7 @@ contracts:
       about: {type: str}
       linkedin_url: {type: str}
     miss: "full_name == null"
+    complete: [full_name, headline, location]   # X-Treg-Route-Complete only
     idempotent: true
 
   linkedin.user.posts:

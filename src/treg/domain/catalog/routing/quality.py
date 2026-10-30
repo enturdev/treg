@@ -23,6 +23,9 @@ import re
 from typing import Any, Protocol, TypeVar
 
 MIN_COMPARABLE = 200  # verdicts compared with other verifiers before a rate is trusted
+# A file may set a lower bar (`min_comparable`) when its scorer judges every answer against an outside
+# reference (a controlled test checked by HLR) rather than against other providers; never below this floor.
+MIN_COMPARABLE_FLOOR = 30
 SLICES = ("all", "catch_all", "normal")
 _VARIANT_SLICE = re.compile(r"^[a-z][a-z_]*(\+[a-z][a-z_]*)*$")
 
@@ -32,6 +35,7 @@ class VerdictQuality:
     decisive_rate: float
     agreement: float
     comparable: int
+    min_comparable: int = MIN_COMPARABLE   # the bar this entry's file set
 
     @property
     def expected_net(self) -> float:
@@ -46,16 +50,22 @@ class RouteQualityReader(Protocol):
 
 
 def parse(doc: Any) -> Snapshot:
-    """The routing file the scorer publishes: `{"slices": {slice: {endpoint_id: {decisive_rate,
-    agreement, comparable}}}}`. Entries missing a number are left out, never guessed."""
+    """The routing file the scorer publishes: `{"min_comparable": n, "slices": {slice: {endpoint_id:
+    {decisive_rate, agreement, comparable}}}}`. Entries missing a number are left out, never guessed;
+    `min_comparable` is optional and clamped to [MIN_COMPARABLE_FLOOR, MIN_COMPARABLE]."""
     out: Snapshot = {}
+    try:
+        bar = int(doc.get("min_comparable", MIN_COMPARABLE)) if isinstance(doc, dict) else MIN_COMPARABLE
+    except (TypeError, ValueError):
+        bar = MIN_COMPARABLE
+    bar = min(MIN_COMPARABLE, max(MIN_COMPARABLE_FLOOR, bar))
     slices = doc.get("slices") if isinstance(doc, dict) else None
     for name, rows in (slices.items() if isinstance(slices, dict) else ()):
         if not (name in SLICES or _VARIANT_SLICE.match(str(name))) or not isinstance(rows, dict):
             continue
         for endpoint_id, row in rows.items():
             try:
-                q = VerdictQuality(float(row["decisive_rate"]), float(row["agreement"]), int(row["comparable"]))
+                q = VerdictQuality(float(row["decisive_rate"]), float(row["agreement"]), int(row["comparable"]), bar)
             except (KeyError, TypeError, ValueError):
                 continue
             if not (0 <= q.decisive_rate <= 1 and 0 <= q.agreement <= 1 and q.comparable >= 0):
@@ -72,7 +82,7 @@ def variant_slice(variant: tuple[str, ...]) -> str:
 def rated(snapshot: Snapshot | None, endpoint_id: str, slice_: str) -> VerdictQuality | None:
     """This endpoint's quality on the slice; None when it has too few compared verdicts there."""
     q = (snapshot or {}).get(slice_, {}).get(endpoint_id)
-    return q if q is not None and q.comparable >= MIN_COMPARABLE else None
+    return q if q is not None and q.comparable >= q.min_comparable else None
 
 
 T = TypeVar("T")

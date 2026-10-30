@@ -933,7 +933,10 @@ on it (at least one team), and a run that dies holds the lease only until it exp
 The metered path is `_platform_offer` → spend caps → `ledger.reserve_in_transaction` →
 application commit → relay → settle or release. Settlement uses the frozen basis and provider
 evidence through `_observed_cost_micro`; it falls back to the estimate when evidence is unavailable.
-Provider-specific calculation stays outside the faithful relay.
+Provider-specific calculation stays outside the faithful relay. Two pure functions hold the
+arithmetic: `resolve.price_call` (estimate, units, frozen basis) and `settle.decide_settle` (charge
+or release, and how much, before any ledger write); the replay engine calls the same two
+(architecture/replay.md).
 
 | Evidence | Settlement behavior |
 |---|---|

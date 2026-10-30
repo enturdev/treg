@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, delete, func, or_, update
+from sqlalchemy import and_, delete, func, literal_column, or_, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import select
 
@@ -73,6 +73,11 @@ TOPUP_MAX_USD = 2_000
 # any other we add later (required suffix is 8 letters — see Stripe's integration_identifier docs).
 INTEGRATION_ID = "tregtopup-qwkmzhrb"
 AUTH_REQUIRED_CODES = {"authentication_required", "invoice_payment_intent_requires_action"}
+
+
+# Postgres matches the partial topup index (revision 0090) only when the predicate is a constant
+# in the statement; a bound `kind` would let a cached generic plan walk all of a team's rows.
+_TOPUP = literal_column("'topup'")
 
 
 class BillingNotConfigured(Exception):
@@ -156,7 +161,7 @@ async def next_default_usd(db: AsyncSession, org_id: int | None) -> int:
         return int(s.topup_default_usd)
     rows = (await db.execute(
         select(LedgerEntry.amount_micro, LedgerEntry.meta)
-        .where(LedgerEntry.org_id == org_id, LedgerEntry.kind == "topup")
+        .where(LedgerEntry.org_id == org_id, LedgerEntry.kind == _TOPUP)
         .order_by(LedgerEntry.created_at.desc(), LedgerEntry.id.desc()).limit(50)
     )).all()
     last_micro = None
@@ -298,7 +303,7 @@ async def monthly_autotopup_spend(db: AsyncSession, org_id: int) -> int:
     # and the flag is matched in Python. A month's top-ups is a handful of rows, not a scan.
     rows = (await db.execute(
         select(LedgerEntry.amount_micro, LedgerEntry.meta).where(
-            LedgerEntry.org_id == org_id, LedgerEntry.kind == "topup",
+            LedgerEntry.org_id == org_id, LedgerEntry.kind == _TOPUP,
             LedgerEntry.created_at >= _month_start(),
         )
     )).all()
@@ -607,7 +612,7 @@ async def _load_payment_rows(
     if blocks:
         rows = (await db.execute(
             select(LedgerEntry.block_id, LedgerEntry.meta).where(
-                LedgerEntry.org_id == org.id, LedgerEntry.kind == "topup",
+                LedgerEntry.org_id == org.id, LedgerEntry.kind == _TOPUP,
                 LedgerEntry.block_id.in_([b.id for b in blocks]),
             )
         )).all()
@@ -916,7 +921,7 @@ async def _last_auto_credit_at(db: AsyncSession, org_id: int) -> datetime | None
     while True:
         rows = (await db.execute(
             select(LedgerEntry.created_at, LedgerEntry.meta).where(
-                LedgerEntry.org_id == org_id, LedgerEntry.kind == "topup"
+                LedgerEntry.org_id == org_id, LedgerEntry.kind == _TOPUP
             ).order_by(LedgerEntry.created_at.desc(), LedgerEntry.id.desc())
             .limit(100).offset(offset)
         )).all()

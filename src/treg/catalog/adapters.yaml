@@ -160,15 +160,21 @@ adapters:
     accepts: [[full_name, domain], [first_name, last_name, domain]]
     test_identity: {first_name: Peter, last_name: Jackson, domain: company.com}
     in_expr: {body.data: "list(obj('first_name', first_name, 'last_name', last_name, 'website', domain))"}
+    # Catch-all, generic, personal and invalid qualifications also return an email; only
+    # nominative@pro is a checked work address.
     out: {email: "coalesce(data[0].email[0].email, null)", first_name: "data[0].first_name",
-          last_name: "data[0].last_name", verified: "coalesce(data[0].email[0].email, null) != null"}
+          last_name: "data[0].last_name",
+          verified: "coalesce(data[0].email[0].qualification, null) == 'nominative@pro'"}
     miss: "coalesce(data[0].email[0].email, null) == null"
   dropcontact.people.email.find.linkedin:
     accepts: [[linkedin_url]]
     test_identity: {linkedin_url: "https://www.linkedin.com/in/example"}
     in_expr: {body.data: "list(obj('linkedin', linkedin_url))"}
+    # Catch-all, generic, personal and invalid qualifications also return an email; only
+    # nominative@pro is a checked work address.
     out: {email: "coalesce(data[0].email[0].email, null)", first_name: "data[0].first_name",
-          last_name: "data[0].last_name", verified: "coalesce(data[0].email[0].email, null) != null"}
+          last_name: "data[0].last_name",
+          verified: "coalesce(data[0].email[0].qualification, null) == 'nominative@pro'"}
     miss: "coalesce(data[0].email[0].email, null) == null"
   sixtyfour.people.email.find.work:
     accepts: [[full_name, domain], [first_name, last_name, domain], [linkedin_url]]
@@ -3664,7 +3670,8 @@ adapters:
   blitzapi.people.email.find:
     accepts: [[linkedin_url]]
     in: {linkedin_url: body.person_linkedin_url}
-    out: {email: email, verified: "found == true"}
+    # `found` reports a hit, not a deliverability check; the body carries no verification status.
+    out: {email: email}
     miss: "found == false"
   blitzapi.people.phone.find:
     accepts: [[linkedin_url]]
