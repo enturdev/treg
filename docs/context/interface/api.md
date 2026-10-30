@@ -356,6 +356,8 @@ dependency-cached session remains usable because every session maker sets `expir
 primary admin handlers. `/admin/errors` and `/admin/daily` (per-day calls and per-job answers from
 `endpointdaystat`, optionally split out for one provider) use `get_admin_read_session` for their reads
 after the gate releases its connection: a configured reader, otherwise the original admin pool.
+Each of its statements is cut off after 3 seconds and answered as the report-busy 429, so a polled
+admin report cannot hold the read pool the dashboard reports share.
 It accepts replication lag for the report, never for authorization, and never retries a failed
 reader on the primary (see [super-admin](../architecture/super-admin.md)).
 Authz = org scoping + a role gate: `_can_manage` lets admin/owner manage any org resource, a member only
