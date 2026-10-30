@@ -2815,7 +2815,9 @@ def cmd_call(args, cfg) -> None:
         def call_fn(target, poll_params):
             # Dynamic poll URLs still travel THROUGH treg. Calling the absolute upstream URL from
             # the CLI would bypass server-side credential injection and the host safety check.
-            return c.get(f"/call/{target}", params=poll_params)
+            polled = c.get(f"/call/{target}", params=poll_params)
+            _note(status_class=f"{polled.status_code // 100}xx")
+            return polled
 
         try:
             submitted = submission.json()

@@ -12,8 +12,6 @@ from pathlib import Path
 
 MAX_HOPS = 8
 IDLE_WINDOW_SECONDS = 30 * 60
-_WRAPPERS = frozenset({"sh", "bash", "zsh", "fish", "dash", "ksh", "uv", "uvx", "env", "sudo",
-                       "timeout", "perl", "xargs", "make", "npm", "npx", "nohup", "node", "treg"})
 # Variables an agent sets for the processes it runs. Children inherit them, so one is read only once
 # the process tree has shown that agent to be the nearest.
 _SESSION_VARS = {"claude-code": ("CLAUDE_CODE_SESSION_ID",),
@@ -57,30 +55,19 @@ def reset() -> None:
 
 
 def resolve(config_path: Path, env: dict[str, str], ancestors: list[Proc]) -> Session:
-    agent, anchor = _nearest_agent(env, ancestors)
+    agent, process = next(((a, p) for p in ancestors if (a := _agent_of(p, env))), (None, None))
     if agent is None and not ancestors:
         present = [name for name, keys in _PRESENCE_VARS.items() if any(env.get(k) for k in keys)]
         agent = present[0] if len(present) == 1 else None
-    label = agent or ("human" if _is_tty() else "unknown")
+    label = agent or "unknown"
     if given := env.get("TREG_SESSION_ID", "").strip():
         return Session(given if _SAFE_ID.fullmatch(given) else _hash("env", given), label)
     for key in _SESSION_VARS.get(agent or "", ()):
         if raw := env.get(key):
             return Session(_hash(label, raw), label)
-    if anchor is not None:
-        return Session(_hash(label, f"{anchor.pid}:{anchor.started}"), label)
+    if process is not None:
+        return Session(_hash(label, f"{process.pid}:{process.started}"), label)
     return Session(_hash(label, _idle_window_id(config_path)), label)
-
-
-def _nearest_agent(env: dict[str, str], ancestors: list[Proc]) -> tuple[str | None, Proc | None]:
-    """The nearest agent on the tree, else None and the nearest non-wrapper ancestor."""
-    anchor = None
-    for proc in ancestors:
-        if agent := _agent_of(proc, env):
-            return agent, proc
-        if anchor is None and not _is_wrapper(proc.name):
-            anchor = proc
-    return None, anchor
 
 
 def _agent_of(proc: Proc, env: dict[str, str]) -> str | None:
@@ -97,19 +84,8 @@ def _agent_of(proc: Proc, env: dict[str, str]) -> str | None:
     return None
 
 
-def _is_wrapper(name: str) -> bool:
-    return name in _WRAPPERS or name.startswith("python")
-
-
 def _hash(agent: str, raw: str) -> str:
     return hashlib.sha256(f"{agent}:{raw}".encode()).hexdigest()[:16]
-
-
-def _is_tty() -> bool:
-    try:
-        return sys.stdin.isatty() and sys.stdout.isatty()
-    except (AttributeError, ValueError, OSError):
-        return False
 
 
 def _idle_window_id(config_path: Path) -> str:

@@ -3,6 +3,7 @@ import hashlib
 import os
 import time
 
+import httpx
 import pytest
 
 from treg import cli, cli_analytics, cli_session
@@ -27,17 +28,15 @@ def test_nearest_agent_wins_over_inherited_variables(tmp_path):
     assert resolve(config, {**INHERITED, "TREG_SESSION_ID": "ci-run-7"}, NESTED).id == "ci-run-7"
 
 
-def test_without_a_session_variable_the_anchor_process_names_the_session(tmp_path, monkeypatch):
-    monkeypatch.setattr(cli_session, "_is_tty", lambda: True)
+def test_without_a_session_variable_the_agent_process_names_the_session(tmp_path):
     config = tmp_path / "config.json"
-    assert resolve(config, {"GEMINI_CLI": "1"}, [Proc(9, "node", 5)]) == \
-        cli_session.Session(_hash("gemini-cli", "9:5"), "gemini-cli")
-    assert resolve(config, {}, [Proc(9, "bash", 5), Proc(8, "tmux", 4)]) == \
-        cli_session.Session(_hash("human", "8:4"), "human")
+    assert resolve(config, {"GEMINI_CLI": "1"}, [Proc(9, "zsh", 6), Proc(8, "node", 5)]) == \
+        cli_session.Session(_hash("gemini-cli", "8:5"), "gemini-cli")
+    beside_tmux = resolve(config, {}, [Proc(9, "bash", 5), Proc(8, "tmux", 4)])
+    assert beside_tmux.agent == "unknown" and beside_tmux == resolve(config, {}, [])
 
 
-def test_idle_window_reuses_a_recent_id_and_mints_after_it(tmp_path, monkeypatch):
-    monkeypatch.setattr(cli_session, "_is_tty", lambda: False)
+def test_idle_window_reuses_a_recent_id_and_mints_after_it(tmp_path):
     config = tmp_path / "config.json"
     first = resolve(config, {}, [])
     assert first.agent == "unknown" and resolve(config, {}, []) == first
@@ -92,3 +91,26 @@ def test_disabled_telemetry_sends_no_session_headers(monkeypatch):
         assert client.headers["x-treg-session"] == _hash("codex", "t")
         assert client.headers["x-treg-agent"] == "codex"
     cli_session.reset()
+
+
+def test_an_awaited_call_records_the_last_answer_it_saw(events, monkeypatch):
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def request(self, *a, **k):
+            return httpx.Response(202, json={}, headers={"X-Treg-Async": "{}"})
+
+        def get(self, *a, **k):
+            return httpx.Response(404, json={})
+
+    monkeypatch.setattr(cli, "_client", lambda cfg, **k: FakeClient())
+    monkeypatch.setattr(cli, "await_async_task",
+                        lambda descriptor, submission, call_fn, *a: call_fn("t", []) and {"code": 3})
+    with pytest.raises(SystemExit):
+        cli.main(["call", "x.video-gen.submit", "--await"])
+    (event,) = events
+    assert event["exit_code"] == 3 and event["detail"]["status_class"] == "4xx"

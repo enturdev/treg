@@ -685,8 +685,8 @@ duration in milliseconds, package version, OS, `session` and `agent`. The comman
 handler's, except that `catalog` records its form: `catalog_search`, `catalog_get`, `catalog_job`
 (an id `_job_view` answers, or redirects to its routed id), `catalog_platform` and
 `catalog_request`; bare `catalog` stays `catalog`. Commands add fixed-vocabulary fields through
-`_note`: `error` is the code `_fail` printed, `status_class` (`2xx`, `4xx`, `5xx`) is `call`'s first
-answer, and `tool` is the id given to `call` or `catalog get`, kept only when it has an endpoint
+`_note`: `error` is the code `_fail` printed, `status_class` (`2xx`, `4xx`, `5xx`) is the last answer
+`call` saw (the last poll under `--await`), and `tool` is the id given to `call` or `catalog get`, kept only when it has an endpoint
 id's shape. A usage error (argparse exit 2) is sent as `usage_error` with `options`, the
 unrecognized option names without their values (`-X` for `-Xvalue`, `--flag` for `--flag=value`).
 Help and version flags exit 0 before dispatch and emit nothing. No other argument, query,
@@ -696,17 +696,16 @@ request/response body, path, token, email or team identifier is collected. A ran
 `cli_session.current` resolves the session once per invocation, standard library only:
 `TREG_SESSION_ID` as given (hashed when it is not a short plain token); else the nearest agent on
 the process tree, found by walking at most eight parents (libproc on macOS, `/proc` on Linux,
-nothing elsewhere) past shells and wrappers. Agent variables are inherited by nested agents, so the
-tree decides which agent is nearest (process name, or `CLAUDE_PID` naming the ancestor, since a
-native Claude Code runs under a version-named executable) and only then is that agent's own
-variable read: `CLAUDE_CODE_SESSION_ID` for Claude Code, `CODEX_THREAD_ID` for Codex. Without one
-(Gemini CLI and OpenCode expose none) the session is the agent's process, or the nearest
-non-wrapper ancestor: its pid and start time. With no readable tree, an id in `session-id` beside
-`TREG_CONFIG` is reused while it was last used under 30 minutes ago. Every id derived from the
-machine is sent as `sha256(agent:raw)` cut to 16 hex characters, never raw. `agent` is
-`claude-code`, `codex`, `gemini-cli`, `opencode`, `human` (no agent and a terminal on stdin and
-stdout) or `unknown`; with no readable tree, a single agent's variables present in the environment
-still name it.
+nothing elsewhere). Agent variables are inherited by nested agents, so the tree decides which agent
+is nearest (process name, or `CLAUDE_PID` naming the ancestor, since a native Claude Code runs under
+a version-named executable) and only then is that agent's own variable read:
+`CLAUDE_CODE_SESSION_ID` for Claude Code, `CODEX_THREAD_ID` for Codex. Without one (Gemini CLI and
+OpenCode expose none) the session is the agent's process: its pid and start time. With no agent,
+an id in `session-id` beside `TREG_CONFIG` is reused while it was last used under 30 minutes ago;
+a terminal or tmux ancestor would join weeks of unrelated commands into one session. Every id
+derived from the machine is sent as `sha256(agent:raw)` cut to 16 hex characters, never raw.
+`agent` is `claude-code`, `codex`, `gemini-cli`, `opencode` or `unknown`; with no readable tree, a
+single agent's variables present in the environment still name it.
 
 The public treg.to ingestion token is the default only for the hosted registry and its legacy
 alias. Self-hosted URLs send nothing unless `TREG_CLI_POSTHOG_KEY` is set; the host override is
