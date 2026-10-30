@@ -101,6 +101,8 @@ async def test_a_hit_is_checked_by_bounceban_and_the_verdict_is_stored(clients: 
     v = d["_treg"]["verification"]
     assert v["verdict"] == "invalid" and v["checked"] is True and "reason" not in v
     assert v["served_by"] == "bounceban.people.email.verify" and v["cost_micro"] > 0
+    contract = catalog_store.load().contracts["people.email.find"]
+    assert d["_treg"]["advice"] == contract.check.disagree_advice, "the check wins over the finder's claim"
     total = int(r.headers["X-Treg-Cost-Micro"])
     assert total == d["_treg"]["charged_micro"] == TOMBA_FIND_PRICE + v["cost_micro"]
     assert before - await _balance(clients) == total
@@ -127,6 +129,39 @@ async def test_a_checked_hit_drops_the_advice(
     assert r.json()["_treg"]["verification"]["verdict"] == "valid" and "advice" not in r.json()["_treg"]
     r = await clients.post(f"/call/{FIND}", json=ASK)
     assert "X-Treg-Route-Verify" in r.json()["_treg"]["advice"], "the advice names the header"
+
+
+@pytest.mark.parametrize(("finder_status", "result", "flags", "disagrees"), [
+    ("valid", "deliverable", {}, False),
+    ("valid", "risky", {"is_accept_all": True}, True),
+    ("valid", "unknown", {}, True),
+    ("accept_all", "undeliverable", {}, False),
+])
+async def test_the_check_wins_over_a_verified_claim_it_does_not_confirm(
+    clients: AsyncClient, verifiers_on, monkeypatch, finder_status, result, flags, disagrees,
+):
+    """Only a `verified: true` hit can be contradicted; the finder's answer stays as it said."""
+    hit = (200, {"data": {"email": "a@stripe.com", "score": 90, "verification": {"status": finder_status}}})
+    monkeypatch.setattr(call_service, "relay", _relay({"tomba": [hit], "bounceban": [_bb(result, **flags)]}, []))
+    r = await clients.post(f"/call/{FIND}", json=ASK, headers=ON)
+    d = r.json()
+    assert d["output"]["verified"] is (finder_status == "valid")
+    assert d["_treg"]["verification"]["checked"] is True
+    advice = catalog_store.load().contracts["people.email.find"].check.disagree_advice
+    assert (d["_treg"].get("advice") == advice) is disagrees
+    if not disagrees:
+        assert "advice" not in d["_treg"]
+
+
+def test_disagree_advice_needs_a_verified_output():
+    from treg.domain.catalog.routing import contracts as C
+    base = {"identity": [{"email": "str"}], "output": {"email": {"type": "str"}, "verified": {"type": "bool"}}}
+    check = {"endpoint": VERIFY, "field": "email"}
+    with pytest.raises(ValueError, match="verified"):
+        C.parse_contracts({"contracts": {"x.find": {
+            **base, "output": {"email": {"type": "str"}}, "check": {**check, "disagree_advice": "x"}}}})
+    c = C.parse_contracts({"contracts": {"x.find": {**base, "check": {**check, "disagree_advice": "x"}}}})
+    assert c["x.find"].check.disagree_advice == "x"
 
 
 async def test_a_plain_verify_call_keeps_its_own_order(clients: AsyncClient, verifiers_on, monkeypatch):

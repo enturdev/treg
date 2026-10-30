@@ -1105,6 +1105,9 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
         spent += check_cost
         if verification["checked"]:
             advice = ""   # the verdict answers what the advice suggests
+            if (check.disagree_advice and output.get("verified") is True and not verification.get("pending")
+                    and verification["verdict"] != "valid"):
+                advice = check.disagree_advice   # the check wins; say so where the claim is read
         elif check.skip_advice and verification["reason"] == check.skip_reason:
             advice = check.skip_advice   # the caller asked; say why this hit was not checked
     elif options.verify:
