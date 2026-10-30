@@ -1820,7 +1820,7 @@ adapters:
     accepts: [[target]]
     in:  {target: body.targets}
     in_expr: {body.targets: "list(target)"}
-    out: {summary: "results[0]", backlinks: "results[0].pages_to_subdomain", referring_domains: "results[0].root_domains_to_subdomain"}
+    out: {summary: "results[0]", backlinks: "results[0].external_pages_to_subdomain", referring_domains: "results[0].root_domains_to_subdomain"}
     miss: "results == []"
 
   scrapecreators.reddit.subreddit.posts:
