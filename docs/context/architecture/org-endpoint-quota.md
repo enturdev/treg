@@ -21,6 +21,7 @@ sources:
   - tests/test_org_endpoint_quota_breaker.py
   - tests/test_org_endpoint_quota_telemetry.py
   - tests/test_org_endpoint_quota_rollup.py
+  - tests/test_org_endpoint_quota_rate_observe.py
   - tests/test_org_endpoint_quota_local_rejections.py
   - tests/test_org_endpoint_quota_route.py
   - tests/test_relay_quota_admission.py
@@ -48,6 +49,8 @@ Ordinary catalog calls check after authorization, canonical resolution, resource
 money admission. A cache hit consumes one call immediately before serving the stored answer.
 On a cache miss, relay checks JSON, credential injection and SSRF before quota admission immediately
 before sending. Overflow checks its route, budget, child reservation and request preparation first.
+On the direct path, shared provider-rate observation follows quota admission, so a quota refusal
+does not consume the observed rate window or appear as a provider attempt without an answer.
 Balance, daily/tag cap, resource and other pre-dispatch refusals consume no quota. A quota rejection
 releases any money hold and unused overflow budget; a successful Redis admission followed by
 cancellation or transport failure can still consume a unit without a completed provider request.
@@ -79,6 +82,8 @@ marks its targets admitted in the logical-call context, so a retry does not try 
 allowance again. A known quota refusal during
 optional verification is reported as `unchecked`, preserving the successful find and its normal
 charge. Redis uncertainty permits the child to run and does not produce a call error.
+An optional route upgrade re-asks with another identity as a new logical invocation, so it checks
+the routed allowance again; a refusal preserves the first answer without charging for the upgrade.
 Existing deferred holds are released when the primary route refuses.
 Once an async submission has a task ID, poll errors retain the existing pending response and durable
 worker settlement ownership. Accepted calls are never refunded to the quota after upstream failure,

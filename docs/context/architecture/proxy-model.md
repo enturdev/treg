@@ -440,7 +440,9 @@ child's reserve. The parent - not each child - decides whether the caller pays, 
 closes every child's hold exactly once with `settle.close_deferred(charge=…)`: `charge=True` settles
 each billable child as its own settle would have, `charge=False` releases all of them, because a
 routed call that fails charges the caller nothing. A crash before `close_deferred` runs leaves the
-holds to the reaper, which releases in the caller's favour. The parent only assembles
+holds to the reaper, which releases in the caller's favour. Each child's answer is read by
+`route.child_outcome` (declared miss, not found, rejected, error, adapter error, miss or hit),
+which the replay engine also calls (architecture/replay.md). The parent only assembles
 `{output, raw, _treg}` and owns the idempotency label.
 
 A routed call whose outcome is still pending (`202` with `X-Treg-Route-Outcome: pending`) leaves
@@ -570,8 +572,9 @@ refusal:
    `view.rate_bucket`); it replaces the provider's limit for that route and does not draw from the
    provider's bucket. Each account other than the primary has its own allowance, so its own
    bucket (`<key>#<label>`). In-process on purpose: a second replica
-   doubles the effective rate, and the `rate_pressure` alert (step C) is the answer to that, not a
-   shared counter on the request path.
+   doubles the effective rate. A shared window over the same buckets can run beside it in observe
+   mode (`TREG_PROVIDER_RATE_MODE=observe`, [capacity](../ops/capacity.md)), which logs what it
+   would refuse and refuses nothing.
 2. **One bounded `retry-after` re-send** - on a tier-4 **429** classified `burst` with
    `retry-after ≤ 5 s` (`SMOOTHING_RETRY_MAX_S`), for a **body-less GET/HEAD only**: close the first
    response, sleep, send the identical `UpstreamRequest` once more on the same hold, settle on the

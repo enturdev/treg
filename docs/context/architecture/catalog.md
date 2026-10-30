@@ -1238,6 +1238,18 @@ body whose own `status` is 400 or more settles at zero; other missing, invalid, 
 evidence falls back to the normal estimate/miss rules. `reported_charge` is generic
 catalog metadata, not a provider-specific billing branch, and cannot be combined with `cost.settle`.
 
+A `per_result` cost says how its hold is sized with `cost.reserve`, because its `unit` cannot: a
+`keyword` may be one the caller asked about or one the provider returned. `reserve: {entities: {}}`
+holds per entity the request names. `reserve: {rows: {param, default: {value, source}, max}}` holds
+the caller's `param` (a declared integer `body.` or `queryParams.` field), else `default`, clamped
+to `max` and rounded up to whole `per` blocks; `source` (`docs` or `observed`) says where the
+default came from, because an unsourced default silently decides the hold.
+`cost.settle: {count: {path}}` then settles the length of that response list, capped at the hold;
+it needs `reserve`, `per: 1`, no `reported_charge`, and a list at `path` in the example. A
+`per_result` cost in an entity unit (`resolve._ENTITY_UNITS`) must declare `reserve`;
+`catalog_validate.UNDECLARED_RESERVE` lists the rows that still infer it from the unit, and only
+shrinks.
+
 A provider file, or one endpoint's `cost`, may declare `ceiling_param: {in: query, name, unit: usd}`.
 When the call has a caller ceiling and the caller did not send that query name, the call application
 appends it to the outbound query at the remaining ceiling in USD, so the provider refuses a dearer
@@ -2218,6 +2230,21 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   `{field, confirmed, confirmed_by}` and `X-Treg-Route-Confirmed` says `true` or `false`; a miss
   carries neither. A contract without `confirm`, or the header with `X-Treg-Route-Waterfall: 0`,
   is refused with a 422 before anything is held.
+  `verdict.decisive` (`people.email.verify`: `[valid, invalid]`) names the verdict words that decide
+  under `X-Treg-Route-Decisive`. With the header, an answer with any other word (unknown,
+  catch-all, risky) is kept as `weak` and the waterfall goes on, at most `MAX_WEAK_FALLBACKS` more
+  providers, each at its own price inside `X-Treg-Route-Max-Cost`. Once the first attempt has not
+  decided, the providers left are reordered by measured quality
+  (`domain/catalog/routing/quality.py`): expected net correct verdicts per call, decisive rate x
+  (2 x agreement with the other verifiers - 1), on the catch-all slice after a catch-all word and on
+  all calls otherwise; endpoints with fewer than `MIN_COMPARABLE` compared verdicts keep their price
+  order behind the rated ones, and a caller's `X-Treg-Route-Prefer` order is never reordered. The
+  numbers are read from `<route_quality_prefix><capability>/routing.json` in a private bucket an
+  operator's scorer writes (`infra/route_quality.py`, cached `route_quality_ttl_s`, a request waits
+  at most a second on a cold cache); with none configured or readable the header keeps price order.
+  When nothing decides, the first undecided answer comes back. `_treg.decision` is
+  `{decided, decided_by, ordered_by}` and `X-Treg-Route-Decided` says `true` or `false`. A contract
+  without deciding words, or the header with `X-Treg-Route-Waterfall: 0`, is refused with a 422.
 - **Adapters** — `adapters.yaml`, one per endpoint: `accepts` (identity variants), `in` (contract
   field → `queryParams.x` / `body.x`), `const` (fixed provider params), `out` (core field →
   expression over the body), `miss`, and `route: false` for an adapter that only judges hit/miss

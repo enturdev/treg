@@ -14985,30 +14985,6 @@
         "summary": "Import Skill Folder"
       }
     },
-    "/skills/samples": {
-      "get": {
-        "description": "The hosted sample skills the landing offers — each with its files (SKILL.md/treg.json/.secret)\nand the prompt to try. Public: the landing renders these as file packages.",
-        "operationId": "skill_samples_skills_samples_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response Skill Samples Skills Samples Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Skill Samples"
-      }
-    },
     "/tools": {
       "get": {
         "operationId": "list_tools_tools_get",

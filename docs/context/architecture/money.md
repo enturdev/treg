@@ -637,10 +637,7 @@ it. The one exception is the off-session auto-top-up charge, where the server it
 PaymentIntent's confirmed status - nothing attacker-supplied is involved - so it credits immediately
 and the webhook redelivery lands as a no-op.
 
-The webhook lives at `POST /billing/stripe/webhook`, **deliberately separate from the landing demo's
-`/stripe/webhook`** and signed by a different secret: they are different Stripe accounts' events with
-different consequences, and sharing a path would let one secret authorize the other's effects. It
-**404s when unconfigured**, so a deploy without the secret exposes no unauthenticated POST surface.
+The webhook lives at `POST /billing/stripe/webhook`. It **404s when unconfigured**, so a deploy without the secret exposes no unauthenticated POST surface.
 `verify_event` uses the SDK's `verify_header` (timestamp tolerance = replay protection, and it handles
 the several-signatures case during rotation) rather than `construct_event`, so a genuine event of a
 type this SDK version predates is accepted and then ignored, not rejected as forged. A handler failure
@@ -938,7 +935,10 @@ on it (at least one team), and a run that dies holds the lease only until it exp
 The metered path is `_platform_offer` → spend caps → `ledger.reserve_in_transaction` →
 application commit → relay → settle or release. Settlement uses the frozen basis and provider
 evidence through `_observed_cost_micro`; it falls back to the estimate when evidence is unavailable.
-Provider-specific calculation stays outside the faithful relay.
+Provider-specific calculation stays outside the faithful relay. Two pure functions hold the
+arithmetic: `resolve.price_call` (estimate, units, frozen basis) and `settle.decide_settle` (charge
+or release, and how much, before any ledger write); the replay engine calls the same two
+(architecture/replay.md).
 
 | Evidence | Settlement behavior |
 |---|---|
@@ -1003,6 +1003,11 @@ export really does cost 5,000 keywords. Before this the 20-row default billed a 
 2026-08-12, refunded by hand — and the same number was the catalog's `~$/call` display, so the caller
 saw the wrong price before the call too. On these providers nothing reports a cost after the fact,
 so the reserve IS the charge: a wrong entity count is a wrong bill, not a hold the settle trues up.
+That inference reads the unit name, and a unit name cannot tell "per keyword asked" from "per
+keyword returned": a row billed per returned row in an entity unit held one entity and settled at
+most that. A row that declares `cost.reserve` (architecture/catalog.md) skips the inference and both
+page bounds; its counted settle (`cost.settle.count`) is capped at the hold like every row count, so the
+caller's ceiling and the balance check at reserve still bound the charge.
 
 Fiber natural-language search (`fiber-ai.people.search.natural_language`) adds a fee the page size
 does not name. `_marketplace_pricing` adds two credits, converted with `_usd_to_micro` at the

@@ -160,6 +160,8 @@ _CONTROL_ROUTE_KEYS: frozenset[RouteKey] = frozenset({
     ('/sitemap.xml', ('GET',), 'sitemap_xml'),
     ('/7c2e4a91b5d3f8e6treg2026.txt', ('GET',), 'indexnow_key'),
     ('/install.sh', ('GET',), 'install_sh'),
+    ('/i/{code}', ('GET',), 'install_sh_linked'),
+    ('/i', ('POST',), 'ad_link_mint'),
     ('/selfhost.sh', ('GET',), 'selfhost_sh'),
     ('/quickstart.md', ('GET',), 'quickstart_md'),
     ('/tutorial.md', ('GET',), 'tutorial_md'),
@@ -174,6 +176,7 @@ _CONTROL_ROUTE_KEYS: frozenset[RouteKey] = frozenset({
     ('/skills/web-access/SKILL.md', ('GET',), 'web_access_skill_md'),
     ('/skills/recruit/SKILL.md', ('GET',), 'recruit_skill_md'),
     ('/skills/jev-memory/SKILL.md', ('GET',), 'jev_memory_skill_md'),
+    ('/skills/rea-growth/SKILL.md', ('GET',), 'rea_growth_skill_md'),
     ('/feedback.md', ('GET',), 'feedback_md'),
     ('/favicon.ico', ('GET',), 'favicon'),
     ('/favicon.svg', ('GET',), 'favicon'),
@@ -198,6 +201,8 @@ _CONTROL_ROUTE_KEYS: frozenset[RouteKey] = frozenset({
     ('/gpt6', ('GET',), 'gpt6_page'),
     ('/ugc', ('GET',), 'ugc_page'),
     ('/aeo', ('GET',), 'aeo_page'),
+    ('/rea-growth', ('GET',), 'rea_growth_page'),
+    ('/rea-growth.md', ('GET',), 'rea_growth_md'),
     ('/showcase', ('GET',), 'showcase_page'),
     ('/showcase/leaderboard', ('GET',), 'showcase_leaderboard'),
     ('/showcase/votes/me', ('GET',), 'showcase_my_votes'),
@@ -274,11 +279,7 @@ _CONTROL_ROUTE_KEYS: frozenset[RouteKey] = frozenset({
     ('/onboard/team', ('POST',), 'onboard_team'),
     ('/demo/sandbox', ('POST',), 'demo_sandbox_mint'),
     ('/demo/sandbox/live', ('GET',), 'demo_sandbox_live'),
-    ('/stripe/webhook', ('POST',), 'stripe_webhook'),
-    ('/landing/stripe-feed', ('GET',), 'landing_stripe_feed'),
     ('/demo/sandbox/skill', ('GET',), 'demo_sandbox_skill'),
-    ('/skills/samples', ('GET',), 'skill_samples'),
-    ('/skills/{name}/install.sh', ('GET',), 'skill_install'),
     ('/onboard/seed-tool', ('POST',), 'onboard_seed_tool'),
     ('/onboard/accept-teammate', ('POST',), 'onboard_accept_teammate'),
     ('/invites/{invite_id}/accept', ('POST',), 'accept_my_invite'),
@@ -768,6 +769,17 @@ def _lifespan(role: AppRole):
             find_task = asyncio.create_task(find_index.warm()) if find_index.enabled() else None
             endpoint_observations = app.state.endpoint_observation_reader
             routed_call.configure_endpoint_observation_reader(endpoint_observations)
+            # Measured verdict quality for X-Treg-Route-Decisive; unset settings keep price order.
+            from .infra import route_quality
+            try:
+                quality_reader = route_quality.from_settings(get_settings())
+            except Exception:  # a bad quality config must never stop serving; the header keeps price order
+                logging.getLogger("treg").warning("event=route_quality_disabled", exc_info=True)
+                quality_reader = None
+            routed_call.configure_route_quality_reader(quality_reader)
+            if quality_reader is not None:
+                from .domain.catalog import store as catalog_store
+                quality_reader.warm(catalog_store.load().contracts)
             mcp_reader_bound = role != "control" and _mcp is not None
             if mcp_reader_bound:
                 _mcp.configure_endpoint_observation_reader(endpoint_observations)
@@ -798,6 +810,7 @@ def _lifespan(role: AppRole):
                     if mcp_reader_bound:
                         _mcp.clear_endpoint_observation_reader(endpoint_observations)
                     routed_call.clear_endpoint_observation_reader(endpoint_observations)
+                    routed_call.configure_route_quality_reader(None)
                     await arena.shutdown()
                     await endpoint_observations.aclose()
                     # analytics LAST: it is the sink the other two report their losses into, and a

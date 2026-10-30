@@ -288,6 +288,16 @@ with `X-Treg-Route-Waterfall: 0`, or on a routed tool without a confirm field, t
 refused (422, unbilled). Agreement is not delivery: combine it with `X-Treg-Route-Verify` to also
 check the mailbox.
 
+`X-Treg-Route-Decisive: true` on `treg.people.email.verify` counts an answer only when it decides:
+`valid` or `invalid`. An `unknown`, `catch_all` or `risky` verdict, or a failed attempt, sends the
+check on to at most two more providers, each at its own price inside `X-Treg-Route-Max-Cost`; those
+are asked in order of measured verdict quality where the deployment has it, in price order where it
+does not. A catch-all domain is usually where it pays: most cheap verifiers decline it. The answer
+carries `_treg.decision: {decided, decided_by, ordered_by}` and `X-Treg-Route-Decided: true|false`;
+when nobody decides, the first answer comes back as it was. Your own `X-Treg-Route-Prefer` order is
+kept. With `X-Treg-Route-Waterfall: 0`, or on a routed tool without deciding verdict words, the
+header is refused (422, unbilled).
+
 On `treg.people.phone.find` the same header checks the line with HLR Lookup's live network lookup
 (`hlrlookup.people.phone.verify`): your own HLR key first, `usa_status` only for `+1` numbers, no
 cache reads. The verdict is `live` / `dead` / `unknown`; a live line is not proof the number is

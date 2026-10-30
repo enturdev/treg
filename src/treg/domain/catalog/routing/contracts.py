@@ -64,6 +64,9 @@ class Contract:
     verdict_from: str = ""
     verdict_words: tuple[str, ...] = ()
     verdict_map: dict[str, str] = field(default_factory=dict)
+    # The verdict words that DECIDE (`valid`, `invalid`): under `X-Treg-Route-Decisive` any other
+    # word (unknown, catch-all, risky) sends the call on to the next provider. Empty = refused.
+    verdict_decisive: tuple[str, ...] = ()
     # The check a caller may ask for with `X-Treg-Route-Verify`; None = the header is refused.
     check: Check | None = None
     # The output field two providers must agree on under `X-Treg-Route-Confirm`: a hit counts only
@@ -79,6 +82,10 @@ class Contract:
     # hit ranks ahead of how many keys it uses. Left false on searches, where `{title,
     # company_domain}` and `{company_domain}` are different questions.
     one_subject: bool = False
+    # The output fields a COMPLETE answer carries under `X-Treg-Route-Complete`: an answer missing
+    # any is weak, and an adapter that cannot map them all is asked last. Empty = more than half of
+    # the output fields, the generic rule. A profile without a headline is not a profile.
+    complete: tuple[str, ...] = ()
 
     @property
     def required_output(self) -> tuple[str, ...]:
@@ -229,8 +236,16 @@ def parse_contracts(doc: dict) -> dict[str, Contract]:
             confirm=_parse_confirm(cap, c.get("confirm"), c.get("output") or {}),
             empty_is_failure=bool(c.get("empty_is_failure", False)),
             one_subject=bool(c.get("one_subject", False)),
+            complete=_parse_complete(cap, c.get("complete"), c.get("output") or {}),
             **_parse_verdict(cap, c.get("verdict")))
     return out
+
+
+def _parse_complete(cap: str, raw, output: dict) -> tuple[str, ...]:
+    fields = tuple(str(k) for k in raw or ())
+    if unknown := [k for k in fields if k not in output]:
+        raise ValueError(f"contract {cap}: complete names fields outside its output: {', '.join(unknown)}")
+    return fields
 
 
 def _parse_check(cap: str, raw, output: dict) -> Check | None:
@@ -263,7 +278,11 @@ def _parse_verdict(cap: str, raw) -> dict:
     mapping = {_verdict_key(k) or str(k): str(v) for k, v in (raw.get("map") or {}).items()}
     if not raw.get("from") or not words or any(v not in words for v in mapping.values()):
         raise ValueError(f"contract {cap}: verdict needs `from`, `words`, and a `map` into those words")
-    return {"verdict_from": str(raw["from"]), "verdict_words": words, "verdict_map": mapping}
+    decisive = tuple(str(w) for w in raw.get("decisive") or ())
+    if any(w not in words for w in decisive):
+        raise ValueError(f"contract {cap}: verdict `decisive` must be among its `words`")
+    return {"verdict_from": str(raw["from"]), "verdict_words": words, "verdict_map": mapping,
+            "verdict_decisive": decisive}
 
 
 def parse_adapters(doc: dict) -> dict[str, Adapter]:

@@ -12,10 +12,15 @@ from treg.models import Hold, LedgerEntry
 
 from test_marketplace_call import _balance, platform_on  # noqa: F401
 from test_org_endpoint_quota_call import _enable
+from test_route_quality_upgrade import (
+    EMAIL, ENRICH, HARVEST_FIRST, _Reader, _named,
+    enrich_on,  # noqa: F401
+)
 from test_route_verify import (
     ASK, FIND, ON, TOMBA_FIND_PRICE, TOMBA_HIT, VERIFY, _bb, _relay,
     verifiers_on,  # noqa: F401
 )
+from test_routing import _relay_by_provider
 
 
 def _refuse(monkeypatch, endpoint, outcome, *, limits=None):
@@ -124,6 +129,55 @@ async def test_confirm_keeps_first_hit_when_second_candidate_exhausts_quota(
             LedgerEntry.kind.in_(["settle", "release"])))).scalars().all()
     assert sorted((entry.call_id, entry.kind) for entry in closes) == [
         (call_id + ":r0", "settle"), (call_id + ":r1", "release"),
+    ]
+
+
+async def test_optional_upgrade_preserves_first_hit_when_parent_allowance_is_spent(
+    clients, monkeypatch, enrich_on,
+):
+    parent = "treg.people.enrich"
+    first, upgrade = "blitzapi.people.email.reverse", "harvestapi.linkedin.user.profile"
+    attempts, used = _enable(monkeypatch, {parent: 1, first: 1, upgrade: 1})
+    seen = []
+    script = _relay_by_provider({
+        "blitz": [(200, _named(first, "Alex", "Example"))],
+        "harvest": [(200, _named(upgrade, "Alex", "Example"))],
+    }, seen)
+
+    async def relay(*args, before_outbound=None, **kwargs):
+        assert before_outbound is not None
+        await before_outbound()
+        return await script(*args, **kwargs)
+
+    monkeypatch.setattr(call_route, "_route_quality_reader", _Reader(HARVEST_FIRST))
+    monkeypatch.setattr(call_service, "relay", relay)
+    before = await _balance(clients)
+    response = await clients.post(ENRICH, json=EMAIL, headers={
+        "X-Treg-Route-Upgrade": "linkedin_url",
+    })
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["output"]["full_name"] == "Alex Example"
+    assert result["_treg"]["served_by"] == first
+    assert result["_treg"]["upgrade"] == {
+        "upgraded": False, "via": "linkedin_url", "reason": "org_endpoint_quota_exceeded",
+    }
+    assert response.headers["X-Treg-Route-Upgraded"] == "false"
+    assert [entry[0] for entry in seen] == ["blitz"]
+    assert attempts[parent] == 2 and used[parent] == used[first] == 1
+    assert attempts[upgrade] == used[upgrade] == 0
+    charged = result["_treg"]["tried"][0]["charged_micro"]
+    assert charged > 0
+    assert result["_treg"]["charged_micro"] == int(response.headers["X-Treg-Cost-Micro"]) == charged
+    assert before - await _balance(clients) == charged
+    call_id = response.headers["X-Treg-Call-Id"]
+    assert await _settled_ids() == {call_id + ":r0"}
+    async with session_maker() as db:
+        closes = (await db.execute(select(LedgerEntry).where(
+            LedgerEntry.kind.in_(["settle", "release"])))).scalars().all()
+    assert sorted((entry.call_id, entry.kind) for entry in closes) == [
+        (call_id + ":r0", "settle"), (call_id + ":u:r1", "release"),
     ]
 
 

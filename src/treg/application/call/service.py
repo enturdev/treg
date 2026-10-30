@@ -29,6 +29,7 @@ from ...infra.db import session_maker
 from ...models import Secret
 from ...sandbox_identity import visitor_name
 from ...domain.capacity import marks as capacity_marks
+from ...domain.capacity import rate_observe
 from ...domain.capacity import signatures as capacity_signatures
 from ...domain.capacity.fair_share import NO_SLOT, ShareBusy, fair_share
 from ...domain.capacity.fair_share import RETRY_AFTER_S as RETRY_AFTER_SHARE_S
@@ -1345,6 +1346,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
         # `tool`/`secrets`/`caller.org` stay usable without a reload.
         await db.commit()
         share_slot = NO_SLOT
+        rl = None
         try:
             platform_tier = mk is not None and mk.tier == "platform"
             raw_headers = tuple(request.headers.raw)
@@ -1460,27 +1462,33 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                                        f"try again in {RETRY_AFTER_SHARE_S} s"}) from None
                     if share_slot.waited_ms:
                         smoothed.append(f"share_wait={share_slot.waited_ms}")
-                upstream_started = _now_ms()
+                rate_seen = None
                 relay_options = {}
                 if mk is not None and _quota_targets(request, mk.endpoint_id):
                     async def before_outbound():
-                        nonlocal sent
+                        nonlocal sent, rate_seen
                         await _admit_org_endpoint(request, mk.endpoint_id)
+                        rate_seen = await rate_observe.observe(mk.provider, rl) if platform_tier else None
                         sent = True
 
                     relay_options["before_outbound"] = before_outbound
                 else:
+                    rate_seen = await rate_observe.observe(mk.provider, rl) if platform_tier else None
                     sent = True
-                response = await relay(
-                    upstream_request,
-                    upstream_url, tool, secrets, upstream_client,
-                    drop_params=drop_params or None,
-                    # Identity encoding wherever the body will be READ: the settle's cost
-                    # evidence, and the archive's recording of an own-key answer.
-                    force_identity=mk is not None and (
-                        mk.metered or mk.free_owned_poll or own_key_archivable),
-                    **relay_options,
-                )
+                upstream_started = _now_ms()
+                try:
+                    response = await relay(
+                        upstream_request,
+                        upstream_url, tool, secrets, upstream_client,
+                        drop_params=drop_params or None,
+                        # Identity encoding wherever the body will be READ: the settle's cost
+                        # evidence, and the archive's recording of an own-key answer.
+                        force_identity=mk is not None and (
+                            mk.metered or mk.free_owned_poll or own_key_archivable),
+                        **relay_options,
+                    )
+                finally:
+                    rate_observe.record(rate_seen, response.status if response is not None else None)
                 upstream_ms = _now_ms() - upstream_started
             streaming_free_result = (mk is not None and mk.streamable_free_result
                                      and request.method == "GET" and 200 <= response.status < 300)
@@ -1669,12 +1677,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
         # A submission is deferred only when the provider actually accepted it: a 2xx whose
         # envelope fails the endpoint's `expect` rule (MiniMax answers HTTP 200 with
         # base_resp.status_code 2013 for a bad parameter) is a failure and releases now.
-        terminal_2xx = (mk.settlement_basis.get("when") == "terminal"
-                        and 200 <= response.status < 300)
-        rejected = _submission_rejected(mk, body) if terminal_2xx else ""
-        # A provider that may answer at once (`terminal_on_submission`) and did: an ordinary
-        # settle below, on the same hold, with no pending task.
-        deferred = terminal_2xx and not rejected and not _finished_on_submission(mk, body)
+        deferred, rejected = submission_state(mk, response.status, body)
         account_out_2xx = _account_out_2xx(mk, response, body)
         try:
             request.context.finalization = FinalizationState.FINALIZING
@@ -1965,6 +1968,18 @@ def _only_submits(mk) -> bool:
     """A submitting row never served from the archive: every call must reach the provider. A row
     that may answer at once (`terminal_on_submission`) archives only finished answers, so it may."""
     return _submits(mk) and (mk.async_descriptor or {}).get("terminal_on_submission") is not True
+
+
+def submission_state(mk, status: int, body: bytes) -> tuple[bool, str]:
+    """(deferred, rejected) for one answer: whether a `when: terminal` 2xx is an accepted task
+    left pending for its terminal outcome, and why one is not an accepted submission ("" when it
+    is). Every other answer settles now. Pure: reads only this checkout's catalog."""
+    if not (mk.settlement_basis.get("when") == "terminal" and 200 <= status < 300):
+        return False, ""
+    rejected = _submission_rejected(mk, body)
+    # A provider that may answer at once (`terminal_on_submission`) and did: an ordinary settle,
+    # on the same hold, with no pending task.
+    return not rejected and not _finished_on_submission(mk, body), rejected
 
 
 def _submission_rejected(mk, body: bytes) -> str:

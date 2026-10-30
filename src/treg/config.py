@@ -208,10 +208,6 @@ class Settings(BaseSettings):
 
     api_token: str = "dev-token"
 
-    # DEMO Stripe webhook signing secret (env TREG_DEMO_STRIPE_WEBHOOK_SECRET) for the landing page's live
-    # payments feed (see pubfeed.py). Empty = the /stripe/webhook endpoint is off (404).
-    demo_stripe_webhook_secret: str = ""
-
     # The Stripe sandbox restricted key (env TREG_DEMO_STRIPE_KEY) behind the landing sandbox's ONE
     # live wire: a sandbox call to the exact seeded stripe tool relays for real with THIS key
     # injected — the key never exists in any sandbox org (see sandbox.is_live_tool / api.call_tool).
@@ -274,6 +270,10 @@ class Settings(BaseSettings):
     # how long a call waits in line for a place before a routed job moves on and a direct call is
     # refused, not charged. 0 turns the gate off (TREG_FAIR_SHARE_WAIT_S=0).
     fair_share_wait_s: float = Field(default=2.0, ge=0, le=30)
+    # A shared rate window on treg's own keys (domain/capacity/rate_observe.py). `observe` asks it
+    # about every platform call that goes upstream and logs what it would refuse; nothing is refused.
+    # It needs TREG_KV_URL; without one every verdict is unknown.
+    provider_rate_mode: Literal["off", "observe"] = "off"
 
     # Flat bounties, not a percentage of top-ups. At 0% platform margin a percentage would be a
     # permanent share of pass-through GMV, and — unlike a flat figure — it rewards farming in
@@ -608,6 +608,15 @@ class Settings(BaseSettings):
     archive_body_read_lookup: Literal["db", "r2-first"] = "db"
     archive_body_read_result: Literal["db", "r2-first"] = "db"
     archive_body_read_terminal: Literal["db", "r2-first"] = "db"
+    # Measured verdict quality the router reads under `X-Treg-Route-Decisive`
+    # (infra/route_quality.py): `<prefix><capability>/routing.json` in a private bucket an
+    # operator's scorer writes. Off until all five are set; the header then keeps price order.
+    route_quality_endpoint: str = ""
+    route_quality_bucket: str = ""
+    route_quality_prefix: str = ""
+    route_quality_access_key_id: str = Field(default="", repr=False)
+    route_quality_secret_access_key: str = Field(default="", repr=False)
+    route_quality_ttl_s: float = Field(default=900.0, gt=0)
     archive_object_store_endpoint: str = ""
     archive_object_store_bucket: str = ""
     archive_object_store_access_key_id: str = Field(default="", repr=False)

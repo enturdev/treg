@@ -1483,3 +1483,60 @@ def test_org_rename_follows_slug_change_locally(monkeypatch, tmp_path):
     cli.cmd_org_rename(type("A", (), {"name": "Team B", "slug": "team-b"})(), cfg)
     assert calls == [("/orgs/7", {"name": "Team B", "slug": "team-b"})]
     assert cfg["active_org"] == "team-b" and cfg["token"] == "TK" and saved["active_org"] == "team-b"
+
+
+def test_login_forwards_the_install_links_ad_code(monkeypatch, tmp_path):
+    """`curl -fsSL https://treg.to/i/<code> | sh` leaves the code in ~/.treg/ad-link. The next
+    `treg login` sends it on the sign-in URL, so /login can restore the ad click in whichever
+    browser opens, and forgets it once the login succeeds."""
+    import httpx
+
+    class Resp:
+        def __init__(self, payload, status_code=200):
+            self._payload, self.status_code, self.cookies = payload, status_code, {}
+
+        def json(self):
+            return self._payload
+
+    (tmp_path / "ad-link").write_text("k7x2qp\n", encoding="utf-8")
+    monkeypatch.setattr(cli, "CONFIG_PATH", tmp_path / "config.json")
+    opened: list[str] = []
+    monkeypatch.setattr(cli.webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(httpx, "post", lambda url, **kw: Resp({"login_id": "L" * 24, "code": "ABCD"}))
+    monkeypatch.setattr(httpx, "get", lambda url, **kw: Resp({"token": "tok", "email": "a@b.c", "active_org": "team-a"}))
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    monkeypatch.setattr(cli, "_pin_token_to_active_org", lambda cfg, **kw: None)
+    monkeypatch.setattr(cli, "_maybe_offer_onboarding", lambda cfg: None)
+    args = type("A", (), {"token": None, "email": None})()
+
+    cli.cmd_login(args, {"base_url": "https://treg.to", "token": None})
+
+    assert opened and opened[0].startswith("https://treg.to/login?cli=" + "L" * 24)
+    assert "&ad=k7x2qp" in opened[0] and opened[0].endswith("#code=ABCD")
+    assert not (tmp_path / "ad-link").exists()
+
+
+def test_login_ignores_a_malformed_ad_link_file(monkeypatch, tmp_path):
+    import httpx
+
+    class Resp:
+        def __init__(self, payload):
+            self._payload, self.status_code, self.cookies = payload, 200, {}
+
+        def json(self):
+            return self._payload
+
+    (tmp_path / "ad-link").write_text("../evil?x=1\n", encoding="utf-8")
+    monkeypatch.setattr(cli, "CONFIG_PATH", tmp_path / "config.json")
+    opened: list[str] = []
+    monkeypatch.setattr(cli.webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(httpx, "post", lambda url, **kw: Resp({"login_id": "L" * 24, "code": "ABCD"}))
+    monkeypatch.setattr(httpx, "get", lambda url, **kw: Resp({"token": "tok", "email": "a@b.c", "active_org": "team-a"}))
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    monkeypatch.setattr(cli, "_pin_token_to_active_org", lambda cfg, **kw: None)
+    monkeypatch.setattr(cli, "_maybe_offer_onboarding", lambda cfg: None)
+    args = type("A", (), {"token": None, "email": None})()
+
+    cli.cmd_login(args, {"base_url": "https://treg.to", "token": None})
+
+    assert opened and "ad=" not in opened[0]

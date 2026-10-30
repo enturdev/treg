@@ -717,13 +717,12 @@ shared HTTP client. `/auth/logout` remains an HTTP-only cookie action.
   "List as vendor" modal hands vendors a prompt naming this URL; the repo-side counterpart is
   `docs/VENDORS.md`).
   Browser-facing auth pages (GitHub callback, OAuth-connect result) render via `_auth_page` (brand card).
-- **Landing sandbox + hosted skills:** the landing sandbox is **closed**: `POST /demo/sandbox`
+- **Landing sandbox:** the landing sandbox is **closed**: `POST /demo/sandbox`
   returns 410 and authentication refuses every sandbox visitor token with 403
   ([landing-sandbox](landing-sandbox.md)); the rest of this entry describes the unreachable code
   awaiting removal. `demo_sandbox_mint` (`POST /demo/sandbox`, open, per-IP rate-limited) minted an anonymous throwaway team (its response now carries `live` = whether the seeded
   stripe tool is a real wire); `demo_sandbox_skill` (`GET /demo/sandbox/skill`) exports what the visitor
-  built. `skill_samples` (`GET /skills/samples`, open) + `skill_install`
-  (`GET /skills/{name}/install.sh?token=`) host sample skills. `call_tool` short-circuits **sandbox**
+  built. `call_tool` short-circuits **sandbox**
   orgs to `sandbox.synthesize` (real injection, no network). Caps via
 `domain.governance.sandbox.enforce_sandbox_cap`. Full
   behavior: [landing-sandbox](landing-sandbox.md).
@@ -735,11 +734,7 @@ shared HTTP client. `/auth/logout` remains an HTTP-only cookie action.
     (`_enforce_public_demo_ip_cap`) since the wire is one shared credential. `demo_sandbox_live`
     (`GET /demo/sandbox/live`) reports `live` + the visitor's feed name for an existing sandbox.
     `_require_not_live_demo_tool`/`_require_not_live_demo_secret` freeze the seeded `stripe` tool and its
-    `STRIPE_KEY` against edit/delete so a visitor can't break their own live pane. The public payments
-    feed: `stripe_webhook` (`POST /stripe/webhook`, 404 when `demo_stripe_webhook_secret` unset, verifies
-    the signature via `pubfeed.verify_signature`, pushes a `charge.succeeded` into `pubfeed.push_charge`)
-    and `landing_stripe_feed` (`GET /landing/stripe-feed`, unauthenticated SSE via `pubfeed.stream`,
-    server-chosen fields only).
+    `STRIPE_KEY` against edit/delete so a visitor can't break their own live pane.
 - **Public demo token (publishable, call-only credential):** `create_public_token`
   (`POST /orgs/{id}/public-token`, owner-only) flips the org to `public_demo` and mints a **viewer-role**
   token bound to a dedicated can't-log-in identity (`pub-<slug>@public-demo.treg.local`) - safe to print
