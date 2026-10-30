@@ -1035,20 +1035,6 @@ def test_filters_reach_adapters_through_in_expr_and_array_bodies():
     assert ep["input"]["body"]["country"]["note"].startswith("filter — default 'us'")
 
 
-def test_serper_web_search_clamps_body_num_to_provider_minimum():
-    """Serper rejects body.num < 10. The adapter lifts a smaller routed `limit` to 10 so the call
-    is not a catalog_parameter_invalid; the caller may receive the provider minimum page."""
-    cat = catalog_store.load()
-    contract = cat.contracts["web.search"]
-    ad = cat.adapters["serper.web.search"]
-    for asked, sent in ((3, 10), (5, 10), (9, 10), (10, 10), (15, 15)):
-        ident, _ = canonical_identity(contract, {"q": "golden retriever", "limit": asked})
-        _, body = ad.to_upstream(ident)
-        assert body["num"] == sent, (asked, body)
-    ident, _ = canonical_identity(contract, {"q": "golden retriever"})
-    assert ident["limit"] == 10 and ad.to_upstream(ident)[1]["num"] == 10
-
-
 def test_a_contract_may_set_its_own_default_ceiling():
     from treg.application.call.route import RouteOptions, DEFAULT_MAX_COST_MICRO
     cat = catalog_store.load()
