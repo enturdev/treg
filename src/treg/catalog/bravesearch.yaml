@@ -53,7 +53,7 @@ endpoints:
       source_url: https://brave.com/search/api/
       checked: '2026-10-30'
       confidence: documented
-      note: "Search plan lists $5 per 1,000 successful requests; no per-call dollar meter is exposed."
+      note: "Live probes matched the documented rate; no per-call dollar meter is exposed."
     docs_url: https://api-dashboard.search.brave.com/api-reference/web/search/get
 
   - id: bravesearch.web.search.news

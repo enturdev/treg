@@ -2977,12 +2977,14 @@ adapters:
   # ---- open web -----------------------------------------------------------------------------
   bravesearch.web.search:
     accepts: [[q]]
+    max: {limit: 20}
     in: {q: queryParams.q}
     in_expr: {queryParams.count: limit}
     out: {results: web.results, count: "len(coalesce(web.results, []))"}
     miss: "coalesce(web.results, []) == []"
   bravesearch.web.search.news:
     accepts: [[q]]
+    max: {limit: 50}
     in: {q: queryParams.q}
     in_expr: {queryParams.count: limit}
     out: {results: results, count: "len(coalesce(results, []))"}

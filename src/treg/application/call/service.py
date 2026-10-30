@@ -925,9 +925,9 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                 await _store_idempotent(idem_key, caller, status_code=response.status,
                                         body=await _drain(response), media_type="application/json",
                                         charged_micro=charged,
-                                        metered=not _response_retention_forbidden(
-                                            (request.context.route_summary or {}).get("served_by")),
-                                        call_ref=call_ref)
+                                        metered=True, call_ref=call_ref,
+                                        response_retention_forbidden=_response_retention_forbidden(
+                                            (request.context.route_summary or {}).get("served_by")))
             except asyncio.CancelledError:
                 await _finish_cancelled_call(request, None, call_ref)
                 raise
@@ -1296,7 +1296,8 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                 await _store_idempotent(idem_key, caller, status_code=response.status, body=body,
                                         media_type=_response_header(response, "content-type"),
                                         charged_micro=charged,
-                                        metered=not _retention_forbidden(), call_ref=call_ref)
+                                        metered=True, call_ref=call_ref,
+                                        response_retention_forbidden=_retention_forbidden())
             except asyncio.CancelledError:
                 await _finish_cancelled_call(
                     request, mk, call_ref, response, trusted_org_id=caller_org)
@@ -1863,11 +1864,11 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                 await _store_idempotent(idem_key, caller, status_code=response.status, body=body,
                                         media_type=_response_header(response, "content-type"),
                                         charged_micro=charged,
-                                        # A streamed or spooled body is not kept for replay: a
-                                        # retry calls the provider again.
-                                        metered=not streaming_free_result and spooled_bytes is None
-                                        and not _retention_forbidden(),
-                                        call_ref=call_ref)
+                                        # A streamed or spooled body is not kept for replay. A
+                                        # forbidden-retention response keeps a 410 receipt instead.
+                                        metered=not streaming_free_result and spooled_bytes is None,
+                                        call_ref=call_ref,
+                                        response_retention_forbidden=_retention_forbidden())
             except asyncio.CancelledError:
                 await _finish_cancelled_call(request, mk, call_ref, response)
                 raise
@@ -1912,12 +1913,13 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
            response_bytes=len(body) if free_poll else None,
            error_request=err_request, error_response=err_response)
     if idem_key:
-        # Unmetered: nothing was billed, so there is nothing to protect. Dropping the claim frees the
-        # label at once instead of making the caller wait out the window to reuse it.
+        # An own-key call is not charged by treg, but a provider that forbids retaining responses
+        # may still bill its owner. Keep a body-free receipt so the same key cannot repeat it.
         try:
             await _store_idempotent(idem_key, caller, status_code=response.status, body=b"",
                                     media_type="", charged_micro=0, metered=False,
-                                    call_ref=call_ref)
+                                    call_ref=call_ref,
+                                    response_retention_forbidden=_retention_forbidden())
         except asyncio.CancelledError:
             await _finish_cancelled_call(request, mk, call_ref, response)
             raise

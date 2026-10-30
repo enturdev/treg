@@ -219,8 +219,9 @@ related:
 
 `response_retention: forbidden` on a provider or endpoint is distinct from `cache: forbidden`.
 The latter prevents archive storage and replay; the former also suppresses response bodies in
-call events, failure evidence, metered idempotency replays, routed parent output, and Web Arena
-run records. `/call/` still returns the upstream body to the active caller. A provider-level
+call events, failure evidence, idempotency response bodies, routed parent output, and Web Arena
+run records. Idempotency retains a 410 charge receipt so repeating the same key cannot call the
+provider again. `/call/` still returns the upstream body to the active caller. A provider-level
 declaration is inherited by each endpoint at catalog load. Brave Search uses both declarations
 because its terms prohibit retaining API response data. Its committed adapter examples are
 synthetic shapes, while the `verified` dates record live upstream checks.
