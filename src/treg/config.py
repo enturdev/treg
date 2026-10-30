@@ -254,6 +254,10 @@ class Settings(BaseSettings):
     # how long a call waits in line for a place before a routed job moves on and a direct call is
     # refused, not charged. 0 turns the gate off (TREG_FAIR_SHARE_WAIT_S=0).
     fair_share_wait_s: float = Field(default=2.0, ge=0, le=30)
+    # A shared rate window on treg's own keys (domain/capacity/rate_observe.py). `observe` asks it
+    # about every platform call that goes upstream and logs what it would refuse; nothing is refused.
+    # It needs TREG_KV_URL; without one every verdict is unknown.
+    provider_rate_mode: Literal["off", "observe"] = "off"
 
     # Flat bounties, not a percentage of top-ups. At 0% platform margin a percentage would be a
     # permanent share of pass-through GMV, and — unlike a flat figure — it rewards farming in

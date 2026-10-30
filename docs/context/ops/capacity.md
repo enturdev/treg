@@ -28,6 +28,9 @@ sources:
   - tests/test_capacity_fair_share.py
   - src/treg/infra/provider_concurrency.py
   - tests/test_provider_concurrency_redis.py
+  - src/treg/domain/capacity/rate_observe.py
+  - src/treg/infra/provider_rate.py
+  - tests/test_capacity_rate_observe.py
   - src/treg/domain/capacity/overflow_seed.json
   - src/treg/infra/upstream/aggregators/__init__.py
   - src/treg/infra/upstream/aggregators/orthogonal.py
@@ -652,6 +655,34 @@ hands places out on this process's count and skips the store for 5 s; without `T
 process enforces the cap on its own, which is exact for one process. `share_wait` appears only for
 a call that met a full provider. Choosing an account (`keyslots`) still reads only this process's
 places.
+
+## Protect, part four - a shared rate window, observed before it refuses
+
+The smoother (D′) is per process and never refuses, so demand above a declared rate still reaches
+the provider and is answered 429, and every further process adds its own allowance. The shared
+window is the gate that would hold the declared rate across processes; it runs in observe mode
+first, so the declared numbers are checked against what providers actually serve before any call
+is refused on them.
+
+`TREG_PROVIDER_RATE_MODE` = `off` (default) | `observe`, with `TREG_KV_URL` set. In `observe`, a
+platform call about to go upstream (not an archive hit, never an own key) asks
+`infra/provider_rate.admit` about its smoothing bucket (`view.rate_bucket`: the provider, an
+endpoint with its own allowance, each further treg-owned account). The window is one sorted set
+per bucket, `treg:provider-rate:v1:` plus the bucket key, on the slot script org concurrency
+uses: an admitted call is a member that expires `window_s` later by the store's clock, and the
+window is full at `limit` live members. A call the window would refuse adds no member, so the
+admitted count is what the provider would see under enforcement. A store fault or a reply slower
+than 200 ms is an `unknown` verdict. The call is relayed unchanged whatever the verdict; the
+smoother's wait and the one `retry-after` re-send (not observed) still apply.
+
+`domain/capacity/rate_observe.py` counts each verdict (`admit`, `over`, `unknown`) against the
+provider's status (`2xx`, `429`, `other`, `none` when the relay raised) and emits one `capacity`
+line `rate_observe` per bucket and process at most once a minute, on that bucket's next call, with
+`provider`, `bucket`, `limit`, `window_s`, `observed_s` and the nonzero cells (`over_2xx`,
+`admit_429`, ...). A quiet bucket's last counts wait for its next call; process exit loses them.
+Sum the lines across processes over the same period. `over_2xx` is what enforcing the declared
+rate would cost (calls the provider served that the gate would have refused); `admit_429` is
+allowance the declared rate overstates.
 
 ## Overflow, the child cycle (step E) — off by default
 

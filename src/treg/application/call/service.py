@@ -29,6 +29,7 @@ from ...infra.db import session_maker
 from ...models import Secret
 from ...sandbox_identity import visitor_name
 from ...domain.capacity import marks as capacity_marks
+from ...domain.capacity import rate_observe
 from ...domain.capacity import signatures as capacity_signatures
 from ...domain.capacity.fair_share import NO_SLOT, ShareBusy, fair_share
 from ...domain.capacity.fair_share import RETRY_AFTER_S as RETRY_AFTER_SHARE_S
@@ -1285,6 +1286,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
         # `tool`/`secrets`/`caller.org` stay usable without a reload.
         await db.commit()
         share_slot = NO_SLOT
+        rl = None
         try:
             platform_tier = mk is not None and mk.tier == "platform"
             raw_headers = tuple(request.headers.raw)
@@ -1399,17 +1401,21 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                                        f"try again in {RETRY_AFTER_SHARE_S} s"}) from None
                     if share_slot.waited_ms:
                         smoothed.append(f"share_wait={share_slot.waited_ms}")
+                rate_seen = await rate_observe.observe(mk.provider, rl) if platform_tier else None
                 upstream_started = _now_ms()
                 sent = True
-                response = await relay(
-                    upstream_request,
-                    upstream_url, tool, secrets, upstream_client,
-                    drop_params=drop_params or None,
-                    # Identity encoding wherever the body will be READ: the settle's cost
-                    # evidence, and the archive's recording of an own-key answer.
-                    force_identity=mk is not None and (
-                        mk.metered or mk.free_owned_poll or own_key_archivable),
-                )
+                try:
+                    response = await relay(
+                        upstream_request,
+                        upstream_url, tool, secrets, upstream_client,
+                        drop_params=drop_params or None,
+                        # Identity encoding wherever the body will be READ: the settle's cost
+                        # evidence, and the archive's recording of an own-key answer.
+                        force_identity=mk is not None and (
+                            mk.metered or mk.free_owned_poll or own_key_archivable),
+                    )
+                finally:
+                    rate_observe.record(rate_seen, response.status if response is not None else None)
                 upstream_ms = _now_ms() - upstream_started
             streaming_free_result = (mk is not None and mk.streamable_free_result
                                      and request.method == "GET" and 200 <= response.status < 300)
