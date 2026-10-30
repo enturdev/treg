@@ -215,9 +215,8 @@ its header is the open hold ceiling rather than the final charge. No cost header
 non-call response) → nothing extra.
 A 2xx answer over `LARGE_ANSWER_BYTES` printed to a terminal or a pipe (`| head` keeps a prefix; a
 printed one is cut by the agent's output limit) gets one stderr line first, before the body so a cut
-end keeps it (`_large_answer_hint`): its size, the largest list (`_largest_list`: most items, through
-objects and each list's first item, shallower then earlier on a tie, so a routed answer names
-`output`), and how to keep it whole (`> a.json 2> a.err`) and read part of it (`jq '<path>[:3]'`).
+end keeps it (`_large_answer_hint`): its size, how to keep it whole (`> a.json 2> a.err`) and to read
+the parts needed with jq. It names no path: a guessed "main list" can point at the wrong one.
 A redirect to a file gets nothing; stdout stays the exact body.
 
 **Per-process identity:** `TREG_TOKEN` (+ optional `TREG_ORG`) in the environment beat

@@ -2641,44 +2641,18 @@ def _call_envelope(response: httpx.Response, content_type: str) -> dict:
 LARGE_ANSWER_BYTES = 30_000
 
 
-def _largest_list(value, path: str = "", depth: int = 0) -> tuple[int, int, str] | None:
-    """The list with the most items as `(items, -depth, jq path)`, looking through objects and the
-    first item of each list, a few levels deep; a tie goes to the shallower one, then the earlier one
-    (a routed answer's `output` before its `raw`)."""
-    if depth > 5:
-        return None
-    found = None
-    if isinstance(value, list):
-        found = (len(value), -depth, path or ".")
-        children = [(f"{path}[0]", value[0])] if value else []
-    elif isinstance(value, dict):
-        children = [(f"{path}.{k}" if str(k).isidentifier() else f'{path or "."}["{k}"]', v) for k, v in value.items()]
-    else:
-        return None
-    for child_path, child in children:
-        inner = _largest_list(child, child_path, depth + 1)
-        if inner and (found is None or inner[:2] > found[:2]):
-            found = inner
-    return found
-
-
 def _large_answer_hint(response: httpx.Response) -> None:
     """A large answer printed to a terminal or a pipe (an agent's `| head` keeps a prefix, a printed
     one is cut by the agent's output limit) gets one stderr line BEFORE the body, so it survives a cut
-    end: how to keep it whole and read part of it. A redirect to a file needs no help, and stdout
-    stays the exact body either way."""
+    end: its size and how to keep it whole. A redirect to a file needs no help, and stdout stays the
+    exact body either way."""
     try:
         mode = os.fstat(sys.stdout.fileno()).st_mode
         if not (sys.stdout.isatty() or stat.S_ISFIFO(mode)) or len(response.content) <= LARGE_ANSWER_BYTES:
             return
-        try:
-            biggest = _largest_list(response.json())
-        except ValueError:
-            biggest = None
-        shape = f" ({biggest[2]}: {biggest[0]} items)" if biggest and biggest[0] > 1 else ""
-        read = f"jq '{biggest[2]}[:3]' a.json" if biggest and biggest[0] > 1 else "jq 'keys' a.json"
-        print(f"treg: this answer is {len(response.content) // 1000} KB{shape}; to keep it whole send it to a "
-              f"file (> a.json 2> a.err) and read parts, e.g. {read}", file=sys.stderr)
+        print(f"treg: this answer is {len(response.content) // 1000} KB; to keep it whole send it to a file "
+              "(> a.json 2> a.err) and read the parts you need with jq (start with jq 'keys' a.json)",
+              file=sys.stderr)
         sys.stderr.flush()
     except Exception:  # noqa: BLE001 - a hint must never change the answer or the exit status
         pass
