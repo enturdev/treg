@@ -541,7 +541,8 @@ Bare **`treg connections`** now lists (the subparser is `required=False` with a 
   only without one), `upstream` (the provider's method and path), `price` in USD with
   `native_price` and the whole `price_note`, `access` (which credential would serve this caller), the
   paste-ready `call` (the catalog's verified test request, the one runnable example; on a routed id it
-  carries `--header 'X-Treg-Route-Max-Cost: 0.05'`, so the way every `route_headers` option is passed
+  carries `--header 'X-Treg-Route-Max-Cost: <the quote's max_cost_usd>'`, the job's own default
+  ceiling written out, so the way every `route_headers` option is passed
   is shown), on a routed id `requires` (one of its contract's identity sets, since each identity param
   is optional alone), the
   endpoint's own rule (`params_note`), prose three or more params share said once (`params_shared`),

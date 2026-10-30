@@ -225,6 +225,13 @@ def _quote_skip(ep: dict, cat) -> str | None:
     return None
 
 
+def _route_max_cost(contract) -> float:
+    """The ceiling a routed call gets without `X-Treg-Route-Max-Cost`, as `route.py` applies it."""
+    from ..application.call.route import DEFAULT_MAX_COST_MICRO
+    return (contract.default_max_cost_usd if contract and contract.default_max_cost_usd
+            else DEFAULT_MAX_COST_MICRO / 1_000_000)
+
+
 def _plan_row(c, cat) -> dict:
     """One quote line, token-frugal: what an agent needs to pick or set a ceiling. Measured rates
     ride only when they exist; the unmeasured case says nothing rather than four nulls. `cost` says
@@ -690,8 +697,9 @@ async def catalog_endpoint(
             # page it points at must name them too.
             "also": [{"endpoint_id": s["id"], "usd": ((s.get("cost") or {}).get("usd")), "cost": catalog_store.quote_cost(s.get("cost"))}
                      for s in siblings if s["id"] not in set(ep.get("routed_children") or [])],
+            "max_cost_usd": _route_max_cost(contract),
             "headers": {"X-Treg-Route-Waterfall": "on by default: a miss tries the next provider; 0 = stop at the first miss",
-                        "X-Treg-Route-Max-Cost": "USD ceiling for the whole call (default 1.00)",
+                        "X-Treg-Route-Max-Cost": f"USD ceiling for the whole call (default {_route_max_cost(contract):.2f})",
                         "X-Treg-Route-Prefer": "provider[,…], the name before an id's first dot (quickenrich), not an endpoint id",
                         "X-Treg-Route-Exclude": "provider[,…], the name before an id's first dot (quickenrich), not an endpoint id",
                         "X-Treg-Route-Strict-Filters": "1 = never call a provider that cannot apply a filter you sent (answers 422, nothing charged); off by default — the answer names what was ignored in X-Treg-Ignored-Filters",

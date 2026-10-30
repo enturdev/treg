@@ -1845,14 +1845,22 @@ def tool_examples(service: str) -> list[dict]:
     return out
 
 
+_HEADLINE: tuple[Catalog, tuple[str, int]] | None = None
+
+
 def headline_counts(cat: Catalog) -> tuple[str, int]:
     """The two numbers every agent-facing surface quotes, taken from the loaded catalog instead of
     typed by hand: direct (non-routed) endpoints rounded DOWN to the hundred with a trailing "+",
     and the providers behind them. Six hand-written copies once disagreed with each other and the
     smallest undersold the catalog by six hundred endpoints; generated, the number cannot drift."""
+    global _HEADLINE
+    if _HEADLINE is not None and _HEADLINE[0] is cat:
+        return _HEADLINE[1]
     direct = [e for e in cat.by_id.values() if e.get("kind") != "routed"]
     providers = {e.get("provider") for e in direct if e.get("provider")}
-    return f"{len(direct) // 100 * 100:,}+", len(providers)
+    counts = f"{len(direct) // 100 * 100:,}+", len(providers)
+    _HEADLINE = cat, counts
+    return counts
 
 
 def empty_is_failure(endpoint_id: str) -> bool:

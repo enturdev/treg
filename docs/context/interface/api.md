@@ -414,9 +414,9 @@ shared HTTP client. `/auth/logout` remains an HTTP-only cookie action.
   baked-in team instead of the caller's first membership); `home` (`GET /home`) is bare `treg` in one
   read: account, active team and role, the `/orgs` team count, balance (an auto top-up trigger, as the
   balance route is), own tool names (`access.usable_tools`, the same filter `/tools` applies) and the
-  catalog's headline size. A member (an agent key included) answers in full; a signed-in user whose
-  team does not resolve (the 400 of no team chosen, `access.NOT_A_MEMBER`, or the bootstrap
-  token's `access.TEAM_SETUP_PENDING`) answers with
+  catalog's headline size (the catalog read off the event loop, the counts cached per loaded catalog). A member (an agent key included) answers in full; a signed-in user whose
+  team does not resolve (`require_member` raises the typed `access.NoTeam`: no team chosen, one
+  the user has left, or the bootstrap token before team setup) answers with
   `team: null`; every other refusal of `require_member` is returned as it is;
   invites via `create_invite` (`POST /orgs/{id}/invites`, admin+) → one-time code (**emailed** via
   `email.send_invite`, best-effort, along with a separate inbox-only `email_token` sign-in link - the

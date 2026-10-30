@@ -39,9 +39,8 @@ from ..domain.governance import teams
 from ..domain.governance.teams import _slugify
 from ..domain.identity.access import (
     AGENT_DOMAIN,
-    NOT_A_MEMBER,
     PUBLIC_DEMO_DOMAIN,
-    TEAM_SETUP_PENDING,
+    NoTeam,
     Caller,
     _is_agent_email,
     _is_machine_email,
@@ -497,9 +496,7 @@ async def home(
     try:
         caller = await require_member(request, x_treg_token, x_treg_org, treg_session, db)
         user = caller.user
-    except HTTPException as exc:
-        if exc.status_code != 400 and exc.detail not in (NOT_A_MEMBER, TEAM_SETUP_PENDING):
-            raise
+    except NoTeam:
         caller, user = None, await require_identity(request, x_treg_token, x_treg_org, treg_session, db)
     count = len(await _visible_orgs(user.id, x_treg_token, x_treg_org, treg_session, db))
     return await home_app.summary(db, user.email, caller, teams=count)

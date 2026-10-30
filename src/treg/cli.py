@@ -5996,13 +5996,13 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int | None = None) -> None:
     """One endpoint, everything about it — the last stop before `treg call`."""
     with _client(cfg, auth=False) as c:
         r = c.get(f"/catalog/endpoints/{quote(endpoint_id, safe='')}")
-    if _JSON_OVERRIDE:
-        _relay_json(r)
-        return
     if r.status_code == 404 and (job := _job_view(endpoint_id, cfg)):
         if isinstance(job, str):  # a job with a routed id: its plan already ranks the providers
             return _catalog_get(job, cfg, limit=limit)
         _emit(*job)
+        return
+    if _JSON_OVERRIDE:
+        _relay_json(r)
         return
     if r.status_code == 404:
         detail = _json_dict(r).get("detail")
@@ -6042,7 +6042,7 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int | None = None) -> None:
         if e.get("overflow_price_usd") is not None else None,
         "access": None if routed_id else _access_detail(endpoint_id, cfg),
         # on a routed id, with a ceiling: how every route option is passed, shown on the call itself
-        "call": _with_route_cap(template) if routed_id else template,
+        "call": _with_route_cap(template, (body.get("routing") or {}).get("max_cost_usd")) if routed_id else template,
         "requires": _requires(body.get("routing")),
         **_params_view(e.get("input") or {}),
         **_price_table_view(cost),
@@ -6136,9 +6136,10 @@ def _example_view(example, endpoint_id: str, cfg) -> dict:
                             f"{base}/catalog/examples/{endpoint_id}" if leaves(clipped) < total else None}
 
 
-def _with_route_cap(template: str) -> str:
-    """The ready call with a cost ceiling: every `route_headers` option rides the same `--header`."""
-    cap = "--header 'X-Treg-Route-Max-Cost: 0.05'"
+def _with_route_cap(template: str, max_cost_usd) -> str:
+    """The ready call with the job's own ceiling written out, so the way every `route_headers` option
+    rides `--header` is shown without changing what the call may spend."""
+    cap = f"--header 'X-Treg-Route-Max-Cost: {max_cost_usd if isinstance(max_cost_usd, (int, float)) else 1:g}'"
     return template.replace(" --data ", f" {cap} --data ", 1) if " --data " in template else f"{template} {cap}"
 
 
