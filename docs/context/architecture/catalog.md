@@ -126,6 +126,16 @@ sources:
   - src/treg/catalog/contracts.yaml
   - src/treg/catalog/millionverifier.yaml
   - src/treg/catalog/adapters.yaml
+  - src/treg/catalog/bravesearch.yaml
+  - src/treg/web/logos/bravesearch.svg
+  - src/treg/catalog/examples/bravesearch.web.search.json
+  - src/treg/catalog/examples/bravesearch.web.search.news.json
+  - src/treg/catalog/examples/bravesearch.web.search.context.json
+  - src/treg/catalog/examples/bravesearch.web.search.images.json
+  - src/treg/catalog/examples/bravesearch.web.search.videos.json
+  - src/treg/catalog/examples/bravesearch.places.search.json
+  - src/treg/catalog/examples/bravesearch.places.detail.json
+  - src/treg/catalog/examples/bravesearch.places.description.json
   - src/treg/catalog/capabilities.yaml
   - src/treg/catalog/prospeo.yaml
   - tests/test_route_cost_ceiling.py
@@ -206,6 +216,14 @@ related:
 ---
 
 # Endpoint catalog — platform-grouped operations per provider
+
+`response_retention: forbidden` on a provider or endpoint is distinct from `cache: forbidden`.
+The latter prevents archive storage and replay; the former also suppresses response bodies in
+call events, failure evidence, metered idempotency replays, routed parent output, and Web Arena
+run records. `/call/` still returns the upstream body to the active caller. A provider-level
+declaration is inherited by each endpoint at catalog load. Brave Search uses both declarations
+because its terms prohibit retaining API response data. Its committed adapter examples are
+synthetic shapes, while the `verified` dates record live upstream checks.
 
 ## Fetchin
 

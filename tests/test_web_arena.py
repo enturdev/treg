@@ -255,12 +255,12 @@ def test_public_task_previews_show_verified_search_providers(monkeypatch):
     try:
         tasks = {row["id"]: row for row in app.tasks()}
         search = {row["provider"] for row in tasks["search"]["provider_previews"]}
-        assert {"crawl4ai", "exa", "firecrawl", "tavily", "tinyfish", "serper", "spidercloud", "octen",
+        assert {"bravesearch", "crawl4ai", "exa", "firecrawl", "tavily", "tinyfish", "serper", "spidercloud", "octen",
                 "parallel"} <= search
         fetch = {row["endpoint_id"] for row in tasks["fetch"]["provider_previews"]}
         assert "parallel.web.extract" in fetch
         news = {row["provider"] for row in tasks["news"]["provider_previews"]}
-        assert news == {"anyapi", "cloro", "dataforseo", "exa", "litescrape", "search1api",
+        assert news == {"anyapi", "bravesearch", "cloro", "dataforseo", "exa", "litescrape", "search1api",
                         "serpapi", "serper", "tavily", "tinyfish"}
         assert {p["endpoint_id"] for p in tasks["papers"]["provider_previews"]} == app.PAPER_ENDPOINTS
         assert {p["endpoint_id"] for p in tasks["youtube"]["provider_previews"]} == app.YOUTUBE_ENDPOINTS
@@ -593,7 +593,7 @@ async def test_news_search_quotes_platform_providers_with_news_parameters(client
             "task": "news", "value": "AI policy", "mode": "battle", "jev": False})
         assert response.status_code == 200, response.text
         quote = response.json()
-        assert {p["endpoint_id"] for p in quote["providers"]} == app.NEWS_ENDPOINTS
+        assert {p["endpoint_id"] for p in quote["providers"]} == app.NEWS_ENDPOINTS - {"bravesearch.web.search.news"}
         async with session_maker() as db:
             from treg.models import WebArenaRun
             saved = await db.get(WebArenaRun, quote["id"])
@@ -613,6 +613,67 @@ async def test_news_search_quotes_platform_providers_with_news_parameters(client
         assert attempts["tavily"]["body"]["topic"] == "news"
         assert attempts["tavily"]["body"]["max_results"] == 10
         assert attempts["tavily"]["body"]["include_usage"] is True
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(("task", "endpoint"), [
+    ("search", "bravesearch.web.search"),
+    ("news", "bravesearch.web.search.news"),
+])
+async def test_brave_arena_quote_and_result_retention(clients, monkeypatch, task, endpoint):
+    monkeypatch.setenv("TREG_WEB_ARENA_ENABLED", "true")
+    monkeypatch.setenv("TREG_PLATFORM_PROVIDERS", "bravesearch")
+    monkeypatch.setenv("TREG_PLATFORM_KEY_BRAVESEARCH", "TEST-BRAVE")
+    get_settings.cache_clear()
+    try:
+        response = await clients.post("/web-arena/api/quotes", json={
+            "task": task, "value": "AI policy", "mode": "battle", "jev": False})
+        assert response.status_code == 200, response.text
+        quote = response.json()
+        assert {p["endpoint_id"] for p in quote["providers"]} == {endpoint}
+        from treg.models import WebArenaRun
+        async with session_maker() as db:
+            row = await db.get(WebArenaRun, quote["id"])
+            payload = app.arena._unpack(row.payload)
+            assert payload["attempts"][0]["query"] == {"q": "AI policy", "count": "10"}
+            row.state = "running"
+            db.add(row)
+            await db.commit()
+        attempt = payload["attempts"][0]
+        attempt.update(state="hit", output={"count": 1, "results": [{"url": "https://example.com/private"}]},
+                       quality={"links_checked": [{"url": "https://example.com/private"}], "score": 1})
+        assert await app._save(quote["id"], payload, "completed")
+        async with session_maker() as db:
+            row = await db.get(WebArenaRun, quote["id"])
+            stored = app.arena._unpack(row.payload)["attempts"][0]
+        assert stored["output"] == {"count": 1}
+        assert stored["quality"] == {"score": 1}
+        assert "example.com/private" not in str(stored)
+        assert "not retained" in stored["detail"]
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_forbidden_response_retention_drops_metered_replay(clients, monkeypatch):
+    monkeypatch.setenv("TREG_PLATFORM_PROVIDERS", "bravesearch")
+    monkeypatch.setenv("TREG_PLATFORM_KEY_BRAVESEARCH", "TEST-BRAVE")
+    get_settings.cache_clear()
+    seen = []
+    monkeypatch.setattr(service, "relay", _relay_by_provider({"*": [
+        (200, {"web": {"results": [{"title": "Example", "url": "https://example.com/private"}]}}),
+    ]}, seen))
+    try:
+        response = await clients.get("/call/bravesearch.web.search?q=example", headers={
+            "Idempotency-Key": "brave-no-retain"})
+        assert response.status_code == 200, response.text
+        assert response.headers["x-treg-cost-micro"] == "5000"
+        assert len(seen) == 1
+        from treg.models import IdempotentCall
+        async with session_maker() as db:
+            row = (await db.execute(select(IdempotentCall).where(
+                IdempotentCall.key == "brave-no-retain"))).scalar_one_or_none()
+        assert row is None
     finally:
         get_settings.cache_clear()
 

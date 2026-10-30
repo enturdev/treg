@@ -472,6 +472,8 @@ def _parse(directory: Path) -> Catalog:
                 continue
             if "cache" not in raw and meta.get("cache") is not None:
                 raw = {**raw, "cache": meta["cache"]}
+            if "response_retention" not in raw and doc.get("response_retention") is not None:
+                raw = {**raw, "response_retention": doc["response_retention"]}
             # Same inheritance for the provider's SUCCESS rule. A vendor's "HTTP 200 always, read
             # `code`" convention is one fact about the whole provider, and stating it per endpoint
             # means an ingest that adds routes silently ships them without one, and settle.py bills
@@ -761,6 +763,7 @@ def _normalize(raw: dict, provider: str, directory: Path) -> dict:
         # Generated media and its task/result utilities must never replay shared-account ids.
         # Enforce this for core and generated extended rows without changing their public kind.
         "cache": "forbidden" if platform in {"image-gen", "video-gen", "voice-gen", "music-gen"} else raw.get("cache"),
+        "response_retention": raw.get("response_retention"),
         "verified": str(verified) if verified else None,
         "added": str(raw.get("added") or "") or None,
         # {status, means} — a status the provider uses for "asked and answered: no result" (PDL
