@@ -110,6 +110,8 @@ def test_expression_language():
     assert P.evaluate("join(a, b)", {"a": "Patrick", "b": "Collison"}) == "Patrick Collison"
     assert P.evaluate("at_most(limit, 10)", {"limit": 3}) == 3
     assert P.evaluate("at_most(limit, 10)", {"limit": 25}) == 10
+    assert P.evaluate("at_least(limit, 10)", {"limit": 3}) == 10
+    assert P.evaluate("at_least(limit, 10)", {"limit": 25}) == 25
     with pytest.raises(ValueError):
         P.evaluate("nope(a)", doc)
 
