@@ -1037,7 +1037,7 @@ def test_filters_reach_adapters_through_in_expr_and_array_bodies():
 
 def test_serper_web_search_clamps_body_num_to_provider_minimum():
     """Serper rejects body.num < 10. The adapter lifts a smaller routed `limit` to 10 so the call
-    is not a catalog_parameter_invalid; the router then trims the rows back to the caller's limit."""
+    is not a catalog_parameter_invalid; the caller may receive the provider minimum page."""
     cat = catalog_store.load()
     contract = cat.contracts["web.search"]
     ad = cat.adapters["serper.web.search"]
@@ -1944,27 +1944,6 @@ async def test_crawl4ai_answers_scrape_and_search_first_by_default(clients, monk
         assert seen[0][3] == first_seen
     else:
         assert seen[0][2] == {"q": "rust web crawler"}
-    get_settings.cache_clear()
-
-
-async def test_serper_web_search_overfetch_is_trimmed_to_the_caller_limit(clients, monkeypatch):
-    """Prefer Serper with limit 5: upstream gets num=10 (Serper's floor); the answer keeps 5 rows."""
-    monkeypatch.setenv("TREG_PLATFORM_KEY_SERPER", "PLATFORM-SERPER")
-    monkeypatch.setenv("TREG_PLATFORM_PROVIDERS", "serper")
-    get_settings.cache_clear()
-    organic = [{"title": f"t{i}", "link": f"https://example.com/{i}", "snippet": "s"} for i in range(10)]
-    seen = []
-    monkeypatch.setattr(call_service, "relay", _relay_by_provider(
-        {"serper": [(200, {"organic": organic})], "*": []}, seen))
-    r = await clients.post("/call/treg.web.search", json={"q": "golden retriever", "limit": 5},
-                           headers={"X-Treg-Route-Prefer": "serper"})
-    assert r.status_code == 200, r.text
-    assert seen[0][0] == "serper" and seen[0][3]["num"] == 10 and seen[0][3]["q"] == "golden retriever"
-    body = r.json()
-    assert body["_treg"]["served_by"] == "serper.web.search"
-    out = body["output"]
-    assert len(out["results"]) == 5 and out["count"] == 5
-    assert [row["title"] for row in out["results"]] == [f"t{i}" for i in range(5)]
     get_settings.cache_clear()
 
 

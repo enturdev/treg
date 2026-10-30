@@ -1071,18 +1071,6 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
                 output = {**output, field: rows}
                 merged_from = [c.endpoint["id"] for c, _, core_i, _ in answers if (core_i.get(field) or [])]
                 served = merged_from[0]
-    # A provider minimum (`at_least(limit, N)` on the child's page size) may over-fetch. Honour the
-    # caller's `limit` on list answers the same way merge already does; pay for the over-fetch, keep
-    # only the requested rows. Skip when merge already sliced.
-    if not merged_from:
-        field = _list_field(plan.contract)
-        lim = plan.identity.get("limit")
-        rows = output.get(field) if field else None
-        if field and isinstance(lim, int) and isinstance(rows, list) and len(rows) > lim:
-            trimmed = rows[:lim]
-            output = {**output, field: trimmed}
-            if output.get("count") == len(rows):
-                output = {**output, "count": len(trimmed)}
     # The rows answer a LOOSER question than the caller asked when the winner could not express a
     # filter. It is on the attempt, but no caller reads `tried[]` — say it where the answer is, and
     # on a header, or the agent post-filters nothing and never knows why the geography is wrong.
