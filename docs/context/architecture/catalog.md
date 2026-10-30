@@ -2183,7 +2183,11 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   Its `verdict` is `results.verdict` on the serving child, the same word `CallRecord.verdict`
   stores. `X-Treg-Cost-Micro` and `_treg.charged_micro` are find plus check; a check still pending
   after the routed async wait reports its hold and `pending: true`, settled later by the worker. A
-  hit's advice is dropped once a check ran. The header on a contract without `check` is a 422
+  hit's advice is dropped once a check ran, with one exception: the check wins over the finder's
+  own claim. A completed (not pending) verdict other than `valid` on a `verified: true` hit
+  attaches the check's `disagree_advice` instead (both email finds), so an agent reading
+  `output.verified` first is told the check contradicted it. `output.verified` itself stays what the provider said: the find's answer is not altered, and
+  the field means the same with or without the header. The header on a contract without `check` is a 422
   before anything is planned. `people.phone.find`'s check is direct: `hlrlookup.people.phone.verify`
   under its own `people.phone.live` contract (`live` / `dead` / `unknown`; the format check stays
   `people.phone.verify`), `routed: false` because it has one provider, and its adapter

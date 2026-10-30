@@ -45,7 +45,12 @@ contracts:
     # pattern-guessed hits without verifying and bounced on most of them.
     advice_unverified: "This address was found, not confirmed deliverable (verified != true). Send X-Treg-Route-Verify: true and treg checks it with treg.people.email.verify in the same call, or run that check yourself before outreach — a fraction of a cent, and it catches catch-all domains and dead mailboxes."
     # `X-Treg-Route-Verify`: checks every hit, a finder's own `verified` included; BounceBan first here only.
-    check: {endpoint: treg.people.email.verify, field: email, prefer: [bounceban]}
+    # The check wins over the finder's claim: a `verified: true` hit it does not find valid says so.
+    check:
+      endpoint: treg.people.email.verify
+      field: email
+      prefer: [bounceban]
+      disagree_advice: "The provider marked this address verified, but treg's check did not confirm it: read _treg.verification.verdict, which wins over output.verified. Do not send to an invalid address, and treat catch_all, risky or unknown as unconfirmed."
     # `X-Treg-Route-Confirm`: a hit counts only once a second provider returns the same address.
     # Finders that guess from the same name patterns can still agree on a wrong one.
     confirm: email
@@ -68,7 +73,11 @@ contracts:
     one_subject: true           # every variant names one person: cost per hit ranks first
     # A personal find is a guess tied to a profile: one finder's hits have belonged to someone else.
     advice_unverified: "A personal email is found, not confirmed to belong to this person or to accept mail. Send X-Treg-Route-Verify: true and treg checks it with treg.people.email.verify in the same call, or run that check yourself before outreach."
-    check: {endpoint: treg.people.email.verify, field: email, prefer: [bounceban]}
+    check:
+      endpoint: treg.people.email.verify
+      field: email
+      prefer: [bounceban]
+      disagree_advice: "The provider marked this address verified, but treg's check did not confirm it: read _treg.verification.verdict, which wins over output.verified. Do not send to an invalid address, and treat catch_all, risky or unknown as unconfirmed."
 
   # ---- batch 1: social lookups (2026-08-28) ---------------------------------------------------
   instagram.user.profile:
