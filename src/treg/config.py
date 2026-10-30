@@ -125,6 +125,22 @@ class Settings(BaseSettings):
     # The shared key-value store (Redis protocol). Empty = an in-process fallback; see infra/kv.py.
     kv_url: str = ""
 
+    org_endpoint_quota_enabled: bool = False
+    org_endpoint_quota_redis_url: str = ""
+
+    @model_validator(mode="after")
+    def _org_endpoint_quota_configuration(self):
+        if self.org_endpoint_quota_enabled:
+            try:
+                url = urlsplit(self.org_endpoint_quota_redis_url)
+                valid = (url.scheme in {"redis", "rediss"} and bool(url.hostname)
+                         or url.scheme == "unix" and bool(url.path))
+            except ValueError:
+                valid = False
+            if not valid:
+                raise ValueError("enabled endpoint quotas require a valid Redis quota URL")
+        return self
+
     # Published root-call pause, rate and concurrency admission.
     org_flow_control_enabled: bool = False
     org_flow_control_refresh_s: float = Field(default=2.0, ge=0.2, le=10)

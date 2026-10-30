@@ -86,6 +86,8 @@ for _platform_name in _platform_names:
     os.environ[_platform_name] = ""
 # Never let a developer's Redis URL or rollout settings turn tests into shared-store traffic.
 os.environ["TREG_KV_URL"] = ""
+os.environ["TREG_ORG_ENDPOINT_QUOTA_ENABLED"] = "false"
+os.environ["TREG_ORG_ENDPOINT_QUOTA_REDIS_URL"] = ""
 os.environ["TREG_MONEY_ADMISSION_ENABLED"] = "false"
 os.environ["TREG_MONEY_ADMISSION_ORG_IDS"] = "[]"
 os.environ["TREG_ORG_FLOW_CONTROL_ENABLED"] = "false"

@@ -52,6 +52,8 @@ def verifiers_on(monkeypatch, platform_on):
 def _relay(answers: dict[str, list[tuple[int, dict]]], seen: list, gate: dict | None = None):
     """A fake upstream keyed by vendor host and job: `tomba` finds, `tomba-verify` checks."""
     async def relay(request, upstream_url, tool, secrets, client, **kwargs):
+        if before_outbound := kwargs.get("before_outbound"):
+            await before_outbound()
         provider = next(p for p in ("bounceban", "tomba", "hunter") if p in upstream_url)
         key = provider + ("-verify" if "verif" in upstream_url and provider != "bounceban" else "")
         seen.append(key)
@@ -341,6 +343,8 @@ async def test_a_refused_check_says_why_and_costs_nothing(kind, reason):
     parent = type("P", (), {})()
     parent.call_ref = "c1"
     parent.meta = None
+    parent.quota_admissions = set()
+    parent.quota_pending = ()
     parent.input = type("I", (), {"raw_headers": (), "caller": None, "client_ip": "", "catalog_only": False})()
     v, cost = await call_route._run_check(parent, Check(endpoint=VERIFY, field="email", prefer=("bounceban",)),
                                           {"email": "a@b.c"}, None, [], refuse, None)

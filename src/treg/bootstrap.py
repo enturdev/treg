@@ -824,6 +824,8 @@ def _lifespan(role: AppRole):
                     await analytics.drain()
                     await app.state.http.aclose()
                     await kv.close()
+                    from .infra import org_endpoint_quota
+                    await org_endpoint_quota.close()
                 finally:
                     if traffic_reporting:
                         org_traffic.stop_reporting()

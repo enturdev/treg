@@ -674,6 +674,8 @@ window is full at `limit` live members. A call the window would refuse adds no m
 admitted count is what the provider would see under enforcement. A store fault or a reply slower
 than 200 ms is an `unknown` verdict. The call is relayed unchanged whatever the verdict; the
 smoother's wait and the one `retry-after` re-send (not observed) still apply.
+When an org/endpoint quota admission is pending, it runs before the rate observation: a quota
+refusal neither asks the shared rate window nor records a provider attempt without an answer.
 
 `domain/capacity/rate_observe.py` counts each verdict (`admit`, `over`, `unknown`) against the
 provider's status (`2xx`, `429`, `other`, `none` when the relay raised) and emits one `capacity`

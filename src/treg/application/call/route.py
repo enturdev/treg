@@ -145,7 +145,9 @@ _DROP_FROM_CHILD = frozenset({b"content-length", b"content-type", b"transfer-enc
                               b"x-treg-route-decisive", b"x-treg-route-quality",
                               b"x-treg-route-upgrade", b"x-treg-route-complete", b"host"})
 _CALLER_FAULT = frozenset({400, 401, 403, 404, 405, 409, 422})
-_CANDIDATE_LOCAL_FAILURES = frozenset({"tool_access_denied", "policy_denied", "capability_pinned"})
+_CANDIDATE_LOCAL_FAILURES = frozenset({"tool_access_denied", "policy_denied", "capability_pinned",
+                                       "org_endpoint_quota_exceeded"})
+_QUOTA_REFUSALS = frozenset({"org_endpoint_quota_exceeded"})
 _GLOBAL_REFUSALS = frozenset({"insufficient_balance", "tag_spend_cap_reached",
                               "platform_daily_cap_reached", "daily_cap_reached"})
 
@@ -759,7 +761,9 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
         ignored = cand.ignored
         remaining = max(0, options.max_cost_micro - spent) if options.max_cost_micro is not None else None
         child = CallContext(input=_child_input(parent, cand.endpoint, query, body, remaining), call_ref=f"{parent.call_ref}:r{n}",
-                            meta=parent.meta, deferred_settles=pending)
+                            meta=parent.meta, deferred_settles=pending,
+                            quota_admissions=parent.quota_admissions,
+                            quota_pending=parent.quota_pending)
         try:
             response = await execute_child(child, upstream_client)
         except CallFailure as exc:
@@ -767,6 +771,14 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
                 tried.append(Attempt(cand.endpoint["id"], cand.endpoint["provider"], "skipped", None, 0,
                                      "would exceed max cost"))
                 cost_capped = True
+                continue
+            if exc.kind == "org_endpoint_quota_exceeded":
+                if isinstance(exc.detail, dict) and any(
+                    endpoint == exc.detail.get("endpoint_id") for _, endpoint in parent.quota_pending
+                ):
+                    raise
+                tried.append(Attempt(cand.endpoint["id"], cand.endpoint["provider"], "skipped",
+                                     exc.status_code, 0, "endpoint call allowance exhausted"))
                 continue
             if exc.kind in _GLOBAL_REFUSALS or (
                 exc.status_code in _CALLER_FAULT and exc.kind not in _CANDIDATE_LOCAL_FAILURES
@@ -806,7 +818,9 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
                 poll_query = {name: task_id}
                 poll_child = CallContext(
                     input=_child_input(parent, poll_ep, poll_query, {}, remaining),
-                    call_ref=f"{child.call_ref}:p{poll_number}", meta=parent.meta)
+                    call_ref=f"{child.call_ref}:p{poll_number}", meta=parent.meta,
+                    quota_admissions=parent.quota_admissions | {
+                        (parent.input.caller.org_id, poll_ep["id"])})
                 poll_response = await execute_child(poll_child, upstream_client)
                 return poll_response, await _read(poll_response)
 
@@ -1133,7 +1147,8 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
 
 _CHECK_REASONS = {"route_max_cost": "over_cost_limit", "route_no_candidate": "no_checker",
                   **{k: "spend_limit" for k in _GLOBAL_REFUSALS},
-                  **{k: "not_allowed" for k in _CANDIDATE_LOCAL_FAILURES}}
+                  **{k: "not_allowed" for k in _CANDIDATE_LOCAL_FAILURES},
+                  "org_endpoint_quota_exceeded": "quota_exceeded"}
 
 
 def _unchecked(reason: str) -> dict:
@@ -1169,7 +1184,9 @@ async def _run_check(parent: CallContext, check, output: dict, remaining: int | 
     prefer = ((PREFER_HEADER.encode(), ",".join(check.prefer).encode()),) if routed and check.prefer else ()
     child = CallContext(input=_child_input(parent, ep, query, body, remaining, prefer),
                         call_ref=f"{parent.call_ref}:v", meta=parent.meta,
-                        deferred_settles=None if routed else pending)
+                        deferred_settles=None if routed else pending,
+                        quota_admissions=parent.quota_admissions,
+                        quota_pending=parent.quota_pending)
     try:
         response = await execute_child(child, upstream_client)
         raw = await _read(response)

@@ -24,7 +24,7 @@ from ...domain.catalog import results as catalog_results
 from ...domain.catalog import store as catalog_store
 from ...domain.money import with_margin
 from ...domain import provider_resources
-from ...infra import money_admission
+from ...infra import money_admission, org_endpoint_quota
 from ...infra.db import session_maker
 from ...models import Secret
 from ...sandbox_identity import visitor_name
@@ -663,6 +663,55 @@ async def _relay_live_demo(
         response.headers.get("content-type", "application/json"))
 
 
+def _quota_targets(request: _ApplicationRequest, endpoint_id: str) -> tuple[tuple[int, str], ...]:
+    if not get_settings().org_endpoint_quota_enabled:
+        return ()
+    target = (request.caller.org_id, endpoint_id)
+    return tuple(dict.fromkeys(
+        candidate for candidate in (*request.context.quota_pending, target)
+        if candidate not in request.context.quota_admissions))
+
+
+_quota_warning_at: float | None = None
+
+
+def _warn_quota_unavailable() -> None:
+    global _quota_warning_at
+    now = time.monotonic()
+    if _quota_warning_at is None or now - _quota_warning_at >= 60:
+        _quota_warning_at = now
+        logging.getLogger("treg.org_endpoint_quota").warning(
+            "Temporary endpoint quota state unavailable; allowing logical call")
+
+
+async def _admit_org_endpoint(request: _ApplicationRequest, endpoint_id: str) -> None:
+    targets = _quota_targets(request, endpoint_id)
+    if not targets:
+        return
+    if request.db.in_transaction():
+        await request.db.commit()
+    if len(targets) == 1:
+        outcome, failed_target = await org_endpoint_quota.admit(*targets[0]), targets[0]
+    else:
+        outcome, failed_target = await org_endpoint_quota.admit_many(targets)
+    if outcome in {"allowed", "unavailable"}:
+        if outcome == "unavailable":
+            _warn_quota_unavailable()
+            try:
+                analytics.capture_quota_fail_open(targets)
+            except Exception:  # noqa: BLE001 - observation cannot block a permitted call
+                pass
+        request.context.quota_admissions.update(targets)
+        return
+    request.state.call_cost_micro = 0
+    kind = "org_endpoint_quota_exceeded"
+    request.context.refused_by = "policy"
+    raise AuthorizationFailed(kind, status_code=429, detail={
+        "error": kind, "endpoint_id": (failed_target or targets[0])[1],
+        "message": "The organization's allowance for this endpoint is exhausted.",
+    })
+
+
 async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.AsyncClient) -> UpstreamResponse:
     caller = request.caller
     rest = request.raw_rest
@@ -823,6 +872,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
         # each through THIS use case again (child contexts, own hold ids), then assembles one
         # answer. The parent owns the idempotency label and the X-Treg-* stamping below.
         try:
+            request.context.quota_pending += ((caller.org_id, ep["id"]),)
             body_bytes = await _await_before_reserve(request.body(), request, call_ref)
             response, charged = await routed.run_routed(
                 request.context, ep, body_bytes, request.headers.get, upstream_client, execute_call,
@@ -834,7 +884,9 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
             request.state.call_audited = True
             charged = (int(exc.detail.get("charged_micro") or 0)
                        if isinstance(exc.detail, dict) else 0)
-            if exc.kind in ("route_caller_fault", "route_failed"):
+            if exc.kind in routed._QUOTA_REFUSALS:
+                request.state.call_cost_micro = 0
+            elif exc.kind in ("route_caller_fault", "route_failed"):
                 request.state.call_cost_micro = charged
             if idem_key and charged > 0 and exc.kind in ("route_caller_fault", "route_failed"):
                 error_body = jsontext.dumps_bytes(
@@ -1104,6 +1156,8 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                 )  # one shared wire → meter by client IP
             except CallFailure:
                 raise
+            if mk is not None:
+                await _admit_org_endpoint(request, mk.endpoint_id)
             await _await_before_reserve(
                 db.commit(), request, call_ref
             )  # end the DB phase before network I/O (see the same call before relay())
@@ -1128,6 +1182,8 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
         result = demo_sandbox.synthesize(
             request.method, upstream_url, tool, secrets,
             query=request.query_params.multi_items(), body=body)
+        if mk is not None:
+            await _admit_org_endpoint(request, mk.endpoint_id)
         _audit(200)
         return _json_response(result)
 
@@ -1204,10 +1260,15 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                 mk=mk, caller=caller, meta=meta, call_ref=call_ref, status=402,
                 headers=httpx.Headers(()), body=b"", method=request.method,
                 query_items=request.query_params.multi_items(), caller_body=caller_body,
-                client=upstream_client, audit_client=_client_name(request), force_trigger="exhausted")
+                client=upstream_client, audit_client=_client_name(request), force_trigger="exhausted",
+                before_outbound=lambda: _admit_org_endpoint(request, mk.endpoint_id))
         except asyncio.CancelledError:
             _capture(pending)
             await _finish_cancelled_call(request, mk, call_ref, trusted_org_id=caller_org)
+            raise
+        except CallFailure:
+            _capture(pending)
+            request.state.call_cost_micro = 0
             raise
         if outcome is None or not outcome.served or outcome.response is None:
             _capture(pending)  # a refusal after all
@@ -1236,9 +1297,8 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
         return response
 
     # Metered — treg's own money is about to be spent (tier 4's platform key, or a registry OAuth
-    # connect on a pay-per-use app), so take the money FIRST. Deliberately the last gate before the
-    # network: everything above (ACL, deny rules, caps) can still refuse the call, and a refused
-    # call must not leave a hold behind for the reaper to clean up.
+    # connect on a pay-per-use app), so take the money FIRST. Dispatch admission below releases
+    # this hold if a later local check or endpoint quota refuses the call.
     if mk is not None and mk.metered:
         # Rendered BEFORE the reserve while `tool` is live. The application closes its reservation
         # session before returning a 402, so refusal evidence cannot rely on a later ORM load.
@@ -1372,6 +1432,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                     cache_diagnostics["cache_lookup_ms"] = round(
                         (time.monotonic() - lookup_started) * 1000, 3)
             if served is not None:
+                await _admit_org_endpoint(request, mk.endpoint_id)
                 body = served["body"]
                 served_hit = True
                 served_repeat = bool(served.get("repeat_for_org"))
@@ -1401,9 +1462,20 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                                        f"try again in {RETRY_AFTER_SHARE_S} s"}) from None
                     if share_slot.waited_ms:
                         smoothed.append(f"share_wait={share_slot.waited_ms}")
-                rate_seen = await rate_observe.observe(mk.provider, rl) if platform_tier else None
+                rate_seen = None
+                relay_options = {}
+                if mk is not None and _quota_targets(request, mk.endpoint_id):
+                    async def before_outbound():
+                        nonlocal sent, rate_seen
+                        await _admit_org_endpoint(request, mk.endpoint_id)
+                        rate_seen = await rate_observe.observe(mk.provider, rl) if platform_tier else None
+                        sent = True
+
+                    relay_options["before_outbound"] = before_outbound
+                else:
+                    rate_seen = await rate_observe.observe(mk.provider, rl) if platform_tier else None
+                    sent = True
                 upstream_started = _now_ms()
-                sent = True
                 try:
                     response = await relay(
                         upstream_request,
@@ -1413,6 +1485,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                         # evidence, and the archive's recording of an own-key answer.
                         force_identity=mk is not None and (
                             mk.metered or mk.free_owned_poll or own_key_archivable),
+                        **relay_options,
                     )
                 finally:
                     rate_observe.record(rate_seen, response.status if response is not None else None)
@@ -1562,6 +1635,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
         # it is the one worth keeping: this branch carries refresh, timeout, injection and SSRF 502s.
         _renderings = _safe_secret_renderings(tool, secrets)
         _audit(exc.status_code, charged_micro=0 if metered or free_poll else None,
+               refused_by="policy" if exc.kind in routed._QUOTA_REFUSALS else None,
                duration_ms=_now_ms() - started, answered=False,
                error_request=(
                    _ERROR_MASKING_FAILED if _renderings is None else
