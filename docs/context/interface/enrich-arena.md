@@ -512,7 +512,9 @@ at the first structural hit: the adapter supplies the contract's required fields
 does not mean verified deliverability; phone found does not mean a live line. A negative mailbox
 verification verdict is a successful answer. An async attempt that remains in progress, or whose
 foreground poll cannot prove a declared terminal state, is saved and shown as pending with its
-reservation and call reference. Pending stops only that entry's Waterfall; Battle may finish other
+reservation, task ID and call reference. Internal polls continue an admitted submission without
+consuming another endpoint allowance or depending on quota Redis; they still use ordinary call
+authorization and resource ownership checks. Pending stops only that entry's Waterfall; Battle may finish other
 explicitly selected providers concurrently. Only a declared terminal provider status permits the
 entry to advance. Terminal attempts show the actual settled charge, not the maximum reservation.
 Each step shows queued/running, pending, found/no match, error/timeout, skipped/not attempted,

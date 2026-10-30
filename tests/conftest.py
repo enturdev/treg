@@ -86,6 +86,8 @@ for _platform_name in _platform_names:
     os.environ[_platform_name] = ""
 # Never let a developer's Redis URL or rollout settings turn tests into shared-store traffic.
 os.environ["TREG_KV_URL"] = ""
+os.environ["TREG_ORG_ENDPOINT_QUOTA_ENABLED"] = "false"
+os.environ["TREG_ORG_ENDPOINT_QUOTA_REDIS_URL"] = ""
 os.environ["TREG_MONEY_ADMISSION_ENABLED"] = "false"
 os.environ["TREG_MONEY_ADMISSION_ORG_IDS"] = "[]"
 os.environ["TREG_ORG_FLOW_CONTROL_ENABLED"] = "false"
@@ -120,7 +122,7 @@ for _k in (
     "PLATFORM_KEY_FINANCIALDATASETS",
     "PLATFORM_KEY_ADYNTEL", "PLATFORM_EMAIL_ADYNTEL",
     "PLATFORM_KEY_KEENABLE", "PLATFORM_KEY_OLOSTEP",
-    "PLATFORM_KEY_SEARCH1API",
+    "PLATFORM_KEY_SEARCH1API", "PLATFORM_KEY_BRAVESEARCH",
 ):
     os.environ[f"TREG_{_k}"] = ""  # the test upstream is an in-process ASGI transport, not real DNS
 

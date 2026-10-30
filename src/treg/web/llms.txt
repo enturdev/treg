@@ -98,7 +98,8 @@ Publishing a hub tool adds `hub_create`, `hub_update` and `hub_mine`.
   returns. Name a provider only when you need fields only it has.
 <!--/routed-->
 - Choosing a provider yourself: first the one whose inputs match what you hold, then measured
-  reliability, then price. `treg catalog get <id>` lists every provider of the job with all three.
+  reliability, then price. `treg catalog get <id>` compares the job's ten most reliable and cheapest
+  providers with all three, and its `help` names the command that lists them all.
 - Call at the listed price without asking, then report what the call cost: the `X-Treg-Cost-Micro`
   response header, or `cost_usd` over MCP (on a generation task, the amount reserved until the task
   finishes). Before a generation task or a loop over many inputs, tell the human the expected

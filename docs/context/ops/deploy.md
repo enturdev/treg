@@ -244,6 +244,8 @@ controls as appropriate. Connection/query failures propagate without primary fal
 primary pool and releases its connection before the report begins. With no read URL configured,
 `get_admin_read_session` preserves the original admin pool rather than using the general reader's
 API-pool fallback. Configured reader failures never retry on the primary.
+Its statements stop after 3 seconds (the report-busy 429), because it shares the read pool with
+the dashboard reports.
 Before enabling a hosted cutover, verify the running process has the intended read URL, the target
 is a readable replica with the required table grants, and replication lag is acceptable. Configuring
 a URL also moves the dashboard reports above and no other report. Removing it returns `/admin/errors`

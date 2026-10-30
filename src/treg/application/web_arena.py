@@ -37,6 +37,7 @@ RUN_SECONDS = 180
 FIXED_PAGE_SEARCH = {"branddev.web.search", "tinyfish.web.search", "tinyfish.web.search.news",
                      "crawl4ai.web.search"}
 NEWS_ENDPOINTS = {"tinyfish.web.search.news", "search1api.web.news", "exa.web.search.news",
+                  "bravesearch.web.search.news",
                   "anyapi.google.serp.news", "serper.google.serp.news", "cloro.google.serp.news",
                   "serpapi.x.google-news", "dataforseo.x.serp-google-news-live-advanced",
                   "litescrape.google.serp.news", "tavily.web.search.news"}
@@ -270,13 +271,26 @@ async def start(caller, run_id, client, client_ip):
 
 
 async def _save(run_id, payload, state=None):
+    retained = dict(payload)
+    retained["attempts"] = []
+    for attempt in payload["attempts"]:
+        saved = dict(attempt)
+        if service._response_retention_forbidden(saved.get("endpoint_id")):
+            output = saved.get("output") or {}
+            saved["output"] = {"count": output["count"]} if isinstance(output.get("count"), int) else {}
+            if saved.get("state") == "hit":
+                saved["detail"] = "Results are not retained under the provider's terms."
+            if isinstance(saved.get("quality"), dict):
+                saved["quality"] = {k: v for k, v in saved["quality"].items()
+                                    if k != "links_checked"}
+        retained["attempts"].append(saved)
     async with session_maker() as db:
         await db.execute(update(WebArenaRun).where(WebArenaRun.id == run_id)
                          .values(cancel_requested=WebArenaRun.cancel_requested))
         row = await db.get(WebArenaRun, run_id)
         if not row or row.state != "running":
             return False
-        row.payload = arena._pack(payload)
+        row.payload = arena._pack(retained)
         if state:
             row.state = "cancelled" if row.cancel_requested else state
         db.add(row)

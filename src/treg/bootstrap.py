@@ -160,6 +160,8 @@ _CONTROL_ROUTE_KEYS: frozenset[RouteKey] = frozenset({
     ('/sitemap.xml', ('GET',), 'sitemap_xml'),
     ('/7c2e4a91b5d3f8e6treg2026.txt', ('GET',), 'indexnow_key'),
     ('/install.sh', ('GET',), 'install_sh'),
+    ('/i/{code}', ('GET',), 'install_sh_linked'),
+    ('/i', ('POST',), 'ad_link_mint'),
     ('/selfhost.sh', ('GET',), 'selfhost_sh'),
     ('/quickstart.md', ('GET',), 'quickstart_md'),
     ('/tutorial.md', ('GET',), 'tutorial_md'),
@@ -268,6 +270,7 @@ _CONTROL_ROUTE_KEYS: frozenset[RouteKey] = frozenset({
     ('/oauth/grants', ('GET',), 'oauth_grants'),
     ('/oauth/grants/{family_id}/team', ('POST',), 'oauth_grant_set_team'),
     ('/orgs', ('GET',), 'list_orgs'),
+    ('/home', ('GET',), 'home'),
     ('/orgs/{org_id}/invites', ('POST',), 'create_invite'),
     ('/invites/accept', ('POST',), 'accept_invite'),
     ('/invites/mine', ('GET',), 'my_invites'),
@@ -822,6 +825,8 @@ def _lifespan(role: AppRole):
                     await analytics.drain()
                     await app.state.http.aclose()
                     await kv.close()
+                    from .infra import org_endpoint_quota
+                    await org_endpoint_quota.close()
                 finally:
                     if traffic_reporting:
                         org_traffic.stop_reporting()

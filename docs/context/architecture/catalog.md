@@ -126,6 +126,16 @@ sources:
   - src/treg/catalog/contracts.yaml
   - src/treg/catalog/millionverifier.yaml
   - src/treg/catalog/adapters.yaml
+  - src/treg/catalog/bravesearch.yaml
+  - src/treg/web/logos/bravesearch.svg
+  - src/treg/catalog/examples/bravesearch.web.search.json
+  - src/treg/catalog/examples/bravesearch.web.search.news.json
+  - src/treg/catalog/examples/bravesearch.web.search.context.json
+  - src/treg/catalog/examples/bravesearch.web.search.images.json
+  - src/treg/catalog/examples/bravesearch.web.search.videos.json
+  - src/treg/catalog/examples/bravesearch.places.search.json
+  - src/treg/catalog/examples/bravesearch.places.detail.json
+  - src/treg/catalog/examples/bravesearch.places.description.json
   - src/treg/catalog/capabilities.yaml
   - src/treg/catalog/prospeo.yaml
   - tests/test_route_cost_ceiling.py
@@ -206,6 +216,15 @@ related:
 ---
 
 # Endpoint catalog — platform-grouped operations per provider
+
+`response_retention: forbidden` on a provider or endpoint is distinct from `cache: forbidden`.
+The latter prevents archive storage and replay; the former also suppresses response bodies in
+call events, failure evidence, idempotency response bodies, routed parent output, and Web Arena
+run records. Idempotency retains a 410 charge receipt so repeating the same key cannot call the
+provider again. `/call/` still returns the upstream body to the active caller. A provider-level
+declaration is inherited by each endpoint at catalog load. Brave Search uses both declarations
+because its terms prohibit retaining API response data. Its committed adapter examples are
+synthetic shapes, while the `verified` dates record live upstream checks.
 
 ## Fetchin
 
@@ -2183,7 +2202,11 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   Its `verdict` is `results.verdict` on the serving child, the same word `CallRecord.verdict`
   stores. `X-Treg-Cost-Micro` and `_treg.charged_micro` are find plus check; a check still pending
   after the routed async wait reports its hold and `pending: true`, settled later by the worker. A
-  hit's advice is dropped once a check ran. The header on a contract without `check` is a 422
+  hit's advice is dropped once a check ran, with one exception: the check wins over the finder's
+  own claim. A completed (not pending) verdict other than `valid` on a `verified: true` hit
+  attaches the check's `disagree_advice` instead (both email finds), so an agent reading
+  `output.verified` first is told the check contradicted it. `output.verified` itself stays what the provider said: the find's answer is not altered, and
+  the field means the same with or without the header. The header on a contract without `check` is a 422
   before anything is planned. `people.phone.find`'s check is direct: `hlrlookup.people.phone.verify`
   under its own `people.phone.live` contract (`live` / `dead` / `unknown`; the format check stays
   `people.phone.verify`), `routed: false` because it has one provider, and its adapter
@@ -2291,11 +2314,15 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   per call or per result, whose provider bills an answer treg judges a miss: the caller pays those
   too, and the cost note says so). When `miss_billed_by` is non-empty the cost carries `varies:
   true` and `advertised_usd` quotes `usd_per_call: null`: the $0 floor of the range read as "free"
-  to an agent that then paid for hundreds of billed misses. The note leads with "NOT free" and
-  carries the range. Never hand-written; not in any
+  to an agent that then paid for hundreds of billed misses. The note leads with "Not free" and
+  carries the range, how many children bill a miss and the one-provider escape
+  (`X-Treg-Route-Waterfall: 0`); with none it says misses are free. The `input` note names the
+  identity variants, the fields `derive` fills (only when the contract has any) and that options are
+  `X-Treg-Route-*` headers, listed once in the quote's `headers`. Never hand-written; not in any
   provider file.
   `catalog_get` on it returns the contract and the ranked **plan** (the quote) —
-  nothing is reserved. A child the router would not call on treg's key (paused, not
+  nothing is reserved. Each plan and `also` row carries `cost` as `store.quote_cost` cuts it: price and
+  unit only, without settlement detail or what every row would repeat. A child the router would not call on treg's key (paused, not
   `platform_eligible`, no key on this deployment) ranks after the rest with a `skipped` reason.
 - **Ranking** — `routing/plan.py`: own keys (tier 2) first at cost 0; then
   `expected_cost_per_hit = cost_at(request) × P(billed) / P(hit)` where `cost_at` prices *this*

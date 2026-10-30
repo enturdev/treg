@@ -729,6 +729,11 @@ strands those events behind a cancelled flusher. The engine adds Postgres pool
 hygiene (`pool_pre_ping`/`pool_recycle`/sizing) for non-SQLite URLs, and `verify_db` refuses to start with
 no `TREG_SECRET_KEY` on a real DB (an ephemeral key would lose every stored secret on restart).
 
+`capture_quota_fail_open` uses the same flusher and shutdown drain for a bounded per-process
+60-second summary, rather than queuing one event per call. Its counts and capped target examples
+describe unconfirmed admissions, not a durable restriction audit; see
+[org-endpoint quotas](org-endpoint-quota.md#store-contract) for the event contract.
+
 `infra.money_timing.observe_money` measures the ordinary call's `reserve`, `close` and `deferred`
 application scopes with local monotonic timers. These cover optional money admission,
 pool acquisition and session cleanup,
