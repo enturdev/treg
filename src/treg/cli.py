@@ -46,7 +46,7 @@ from urllib.parse import parse_qsl, quote, urlsplit
 import httpx
 
 from . import agents as _agents
-from . import cli_view
+from . import cli_analytics, cli_session, cli_view
 from . import jsontext
 from .capacity_notice import CAPACITY_HEADER, EXHAUSTED, account_out_notice, is_balance_refusal
 from .feedback_contract import FEEDBACK_CATEGORIES, FEEDBACK_DESCRIPTION, REVIEW_USEFULNESS, REVIEW_DESCRIPTION
@@ -65,6 +65,20 @@ _ORG_OVERRIDE: str | None = None
 # contract for agents/scripts. `call` prints one envelope, `{"result": <body>, "_treg": {...}}`,
 # and nothing on stderr, so a script that merges stderr into stdout can still parse it.
 _JSON_OVERRIDE: bool = False
+# What this invocation adds to its `cli_command_completed` event (see _note), cleared in main.
+_TELEMETRY: dict = {}
+_ENDPOINT_ID = re.compile(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+")
+
+
+def _note(*, tool: str | None = None, **fields: str) -> None:
+    """Fixed-vocabulary facts for this invocation's telemetry. `tool` is kept only when it has the
+    shape of an endpoint id, so a URL, query or path typed in its place is never recorded."""
+    _TELEMETRY.update(fields)
+    if tool is not None:
+        if len(tool) <= 128 and _ENDPOINT_ID.fullmatch(tool):
+            _TELEMETRY["tool"] = tool
+        else:
+            _TELEMETRY.pop("tool", None)
 
 
 PRODUCTION_BASE_URL = "https://treg.to"
@@ -257,6 +271,9 @@ def _registry_url(cfg: dict) -> str:
 def _client(cfg: dict, *, auth: bool = True) -> httpx.Client:
     headers = {"ngrok-skip-browser-warning": "1", "X-Treg-Client": _detect_runtime(),
                "X-Treg-Client-Version": cli_version(), "X-Treg-Key-Protocol": "1"}
+    if cli_analytics.enabled():
+        session = cli_session.current(CONFIG_PATH)
+        headers |= {"X-Treg-Session": session.id, "X-Treg-Agent": session.agent}
     # TREG_TOKEN (+ optional TREG_ORG) beats the config file: per-PROCESS identity, so each coding
     # agent on one machine can act as its own scoped agent while ~/.treg/config.json stays the
     # human's. Per-process env is the standard way a runtime carries its own identity — and
@@ -882,6 +899,7 @@ def _emit(view: dict, help_lines: list[str] | None = None, groups: list[tuple[st
 
 def _fail(error: str, message: str, help_lines: list[str] | None = None, **details) -> NoReturn:
     """A refusal an agent can act on: structured, on stdout, exit 1."""
+    _note(error=error[:64])
     _emit({"error": error, "message": message, **details}, help_lines)
     sys.exit(1)
 
@@ -2789,6 +2807,7 @@ def cmd_call(args, cfg) -> None:
             sys.exit(f"--header needs a name before the colon, got: {kv!r}")
         headers[name] = value.strip()
     rest = args.target.rstrip("/")
+    _note(tool=rest)
     if args.path:
         rest += "/" + args.path.lstrip("/")
     # httpx DROPS a URL's existing query string whenever params= is passed (even an empty list), so
@@ -2804,6 +2823,7 @@ def cmd_call(args, cfg) -> None:
     method = args.method or ("POST" if content is not None else "GET")
     with _client(cfg) as c:
         submission = c.request(method, f"/call/{rest}", params=params, content=content, headers=headers)
+        _note(status_class=f"{submission.status_code // 100}xx")
         if not getattr(args, "await_task", False) or not submission.headers.get("X-Treg-Async"):
             _show_call_response(submission)
             return
@@ -2818,7 +2838,9 @@ def cmd_call(args, cfg) -> None:
         def call_fn(target, poll_params):
             # Dynamic poll URLs still travel THROUGH treg. Calling the absolute upstream URL from
             # the CLI would bypass server-side credential injection and the host safety check.
-            return c.get(f"/call/{target}", params=poll_params)
+            polled = c.get(f"/call/{target}", params=poll_params)
+            _note(status_class=f"{polled.status_code // 100}xx")
+            return polled
 
         try:
             submitted = submission.json()
@@ -5296,14 +5318,19 @@ def cmd_catalog(args, cfg) -> None:
     `treg catalog tiktok` keeps working unchanged; no platform slug collides with either word."""
     rest = list(getattr(args, "rest", []) or [])
     if args.platform == "search":
+        _note(command="catalog_search")
         return _catalog_search(" ".join(rest), args, cfg)
     if args.platform == "get":
+        _note(command="catalog_get", tool=rest[0] if rest else None)
         if not rest:
             sys.exit("which endpoint? e.g. treg catalog get tikhub.tiktok.video.comments\n"
                      "find one with: treg catalog search <query>")
         return _catalog_get(rest[0], cfg, limit=getattr(args, "limit", None))
     if args.platform == "request":
+        _note(command="catalog_request")
         return _catalog_request(" ".join(rest), cfg)
+    if args.platform:
+        _note(command="catalog_platform")
     if rest:
         sys.exit(f"unexpected argument {rest[0]!r} — did you mean `treg catalog search {args.platform} {' '.join(rest)}`?")
 
@@ -5997,6 +6024,7 @@ def _catalog_get(endpoint_id: str, cfg, *, limit: int | None = None) -> None:
     with _client(cfg, auth=False) as c:
         r = c.get(f"/catalog/endpoints/{quote(endpoint_id, safe='')}")
     if r.status_code == 404 and (job := _job_view(endpoint_id, cfg)):
+        _note(command="catalog_job")
         if isinstance(job, str):  # a job with a routed id: its plan already ranks the providers
             return _catalog_get(job, cfg, limit=limit)
         _emit(*job)
@@ -7531,11 +7559,14 @@ def main(argv: list[str] | None = None) -> None:
     only, so a second `main()` in the same process (tests, embedders) starts from the defaults."""
     global _ORG_OVERRIDE, _JSON_OVERRIDE
     _ORG_OVERRIDE, _JSON_OVERRIDE = None, False
+    _TELEMETRY.clear()
+    cli_session.reset()
     _utf8_stdio()
     try:
         _main(list(sys.argv[1:] if argv is None else argv))
     finally:
         _ORG_OVERRIDE, _JSON_OVERRIDE = None, False
+        _TELEMETRY.clear()
 
 
 def _main(argv: list[str]) -> None:
@@ -7548,7 +7579,21 @@ def _main(argv: list[str]) -> None:
     parser = build_parser()
     if _looks_like_a_program(argv, _subcommands(parser)):
         argv = ["with", *argv]
-    args = parser.parse_args(argv)
+    parsing = time.monotonic()
+    unrecognized: list[str] = []
+    try:
+        # parse_args, split open so a usage error can name the options it did not know.
+        args, unrecognized = parser.parse_known_args(argv)
+        if unrecognized:
+            parser.error(argparse._("unrecognized arguments: %s") % " ".join(unrecognized))
+    except SystemExit as exc:
+        if exc.code == 2:
+            cli_analytics.track_command(
+                command="usage_error", exit_code=2,
+                duration_ms=round((time.monotonic() - parsing) * 1000),
+                base_url=_load_config().get("base_url", PRODUCTION_BASE_URL),
+                config_path=CONFIG_PATH, detail={"options": _option_names(unrecognized)})
+        raise
     cfg = _load_config()
     if (override and cfg.get("identity") and cfg.get("token") and not os.environ.get("TREG_TOKEN")
             and override != cfg.get("active_org") and getattr(args, "fn", None) is not cmd_org_use):
@@ -7577,11 +7622,23 @@ def _main(argv: list[str]) -> None:
         exit_code = 1
         raise
     finally:
-        from .cli_analytics import track_command
+        detail = dict(_TELEMETRY)
+        cli_analytics.track_command(
+            command=detail.pop("command", args.fn.__name__.removeprefix("cmd_")),
+            exit_code=exit_code, duration_ms=round((time.monotonic() - started) * 1000),
+            base_url=cfg.get("base_url", PRODUCTION_BASE_URL), config_path=CONFIG_PATH,
+            detail=detail)
 
-        track_command(command=args.fn.__name__.removeprefix("cmd_"), exit_code=exit_code,
-                      duration_ms=round((time.monotonic() - started) * 1000),
-                      base_url=cfg.get("base_url", PRODUCTION_BASE_URL), config_path=CONFIG_PATH)
+
+def _option_names(unrecognized: list[str]) -> list[str]:
+    """`-X` for `-Xvalue`, `--flag` for `--flag=value`; anything that is not an option is dropped."""
+    names = []
+    for token in unrecognized:
+        if re.fullmatch(r"--[A-Za-z][\w-]{0,40}(=.*)?", token, re.DOTALL):
+            names.append(token.split("=", 1)[0])
+        elif re.match(r"-[A-Za-z]", token):
+            names.append(token[:2])
+    return names[:10]
 
 
 if __name__ == "__main__":

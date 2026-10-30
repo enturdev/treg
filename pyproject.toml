@@ -126,6 +126,8 @@ type = "forbidden"
 source_modules = [
     "treg.cli",
     "treg.cli_view",
+    "treg.cli_session",
+    "treg.cli_analytics",
     "treg.convert",
     "treg.skills",
     "treg.providers",
