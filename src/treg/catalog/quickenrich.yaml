@@ -302,11 +302,10 @@ endpoints:
         type: string
         required: false
         example: opaque cursor from meta.next_cursor
-    note: 'At least one filter is required. Arrays take at most 100 values. Exact values only, else 422:
-      quickenrich.x.country-codes, quickenrich.x.industries, quickenrich.x.employee-ranges,
-      quickenrich.x.revenue-ranges, quickenrich.x.company-services. Page stops at 10,000 rows; beyond that follow
-      meta.next_cursor (it overrides page) until null. Discovery returns has_email/has_phone flags, not the email
-      or phone: selectively call email/phone find with employee_linkedin or name/company.'
+    note: 'At least one filter is required; arrays take at most 100 values. Country, industry, size, revenue and
+      services need exact values from the free quickenrich.x.* lookups (country-codes, industries, employee-ranges,
+      revenue-ranges, company-services), else 422. Past 10,000 rows follow meta.next_cursor until null. Rows carry
+      has_email/has_phone flags only: get the contact with email/phone find.'
   test_request:
     body:
       company_url:
