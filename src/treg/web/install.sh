@@ -70,6 +70,12 @@ fi
 # point the CLI at this server (falls back silently on older CLIs)
 treg config --base-url "$BASE" >/dev/null 2>&1 || true
 
+# Fetched as {BASE}/i/<code>: leave the code for the next `treg login`. Empty on the plain URL.
+AD_LINK="{AD_LINK}"
+if [ -n "$AD_LINK" ]; then
+  mkdir -p "$HOME/.treg" 2>/dev/null && printf '%s\n' "$AD_LINK" > "$HOME/.treg/ad-link" 2>/dev/null || true
+fi
+
 # install the official treg skill into every detected agent so it knows how to use treg.
 # `treg skill bootstrap` fans out across all supported agents (Claude Code, Cursor, Codex, Gemini,
 # Copilot, OpenCode, Windsurf, …). Fall back to the Claude-only drop for older CLIs without it.

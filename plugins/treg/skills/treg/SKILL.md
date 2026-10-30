@@ -14,6 +14,7 @@ described in `/plugin`:
 - `jev-memory`
 - `lead-signals`
 - `make-ugc`
+- `rea-growth`
 - `recruit`
 - `web-access`
 

@@ -222,6 +222,69 @@ def _declared_miss(endpoint: dict, status: int, raw: bytes) -> bool:
     return True
 
 
+@dataclass(frozen=True)
+class ChildOutcome:
+    """How the router reads one child's answer, before any waterfall option is applied.
+
+    `kind` is `declared_miss`, `not_found`, `rejected` (a 4xx the caller caused), `error`,
+    `adapter_error` (the adapter threw on the body), `miss` or `hit`. A `miss` names its reasons
+    in `why`; a `hit` carries the parsed body, the contract's core output and its row count."""
+
+    kind: str
+    why: tuple[str, ...] = ()
+    detail: str = ""
+    doc: object = None
+    core: dict = field(default_factory=dict)
+    rows: int = 0
+
+
+def child_outcome(endpoint: dict, contract, adapter, status: int, raw: bytes, *,
+                  tier: str) -> ChildOutcome:
+    """Classify one routed child's answer. Pure: reads only this checkout's catalog."""
+    if _declared_miss(endpoint, status, raw):
+        return ChildOutcome("declared_miss")
+    if declared_not_found(endpoint, status, raw):
+        return ChildOutcome("not_found")
+    capacity_signal = classify_capacity(endpoint["provider"], status, body=raw)
+    temporary_capacity = capacity_signal is not None and capacity_signal.kind in ("burst", "unknown")
+    platform_auth_failure = tier == "platform" and status in (401, 403)
+    # 405 and 410 Gone say the PROVIDER cannot serve this route (a discontinued endpoint answers
+    # 410 to every request), whatever the caller sent: fall over as after a 5xx, paid providers too.
+    if (400 <= status < 500 and status not in (402, 405, 408, 410, 429)
+            and not platform_auth_failure and not temporary_capacity):
+        return ChildOutcome("rejected")
+    if not 200 <= status < 300:
+        return ChildOutcome("error")
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        doc = None
+    try:
+        core = adapter.from_upstream(doc) if doc is not None else {}
+    except Exception as exc:  # noqa: BLE001 — adapter threw on provider response
+        return ChildOutcome("adapter_error", detail=f"adapter.from_upstream failed: {exc}"[:120])
+    # A miss is what the adapter's predicate says - OR a 2xx whose body does not carry the
+    # contract's required core (a null `result` under a 200, an error task inside a 20000
+    # envelope): the caller asked for the field and did not get it.
+    empty_core = any(core.get(k) in (None, "", [], {}) for k in contract.required_output)
+    try:
+        is_miss = adapter.is_miss(doc) if doc is not None else True
+    except Exception as exc:  # noqa: BLE001 — adapter threw on provider response
+        return ChildOutcome("adapter_error", detail=f"adapter.is_miss failed: {exc}"[:120])
+    # The provider's own `expect` success rule (a DataForSEO task status other than 20000 under
+    # a 20000 envelope) says this request failed: not an answer, whatever the remains read as.
+    upstream_failed = catalog_results.fails_expect(endpoint["id"], raw)
+    if doc is None or is_miss or empty_core or upstream_failed:
+        why = tuple(name for name, on in (
+            ("non_json", doc is None), ("adapter_miss", is_miss), ("empty_core", empty_core),
+            ("expect_failed", bool(upstream_failed))) if on)
+        return ChildOutcome(
+            "miss", why=why, doc=doc,
+            detail=f"provider reported failure: {upstream_failed}" if upstream_failed else "")
+    rows = max((len(v) for v in core.values() if isinstance(v, list)), default=1)
+    return ChildOutcome("hit", doc=doc, core=core, rows=rows)
+
+
 DEFAULT_MAX_COST_MICRO = 1_000_000  # $1.00 per routed call unless the caller says otherwise — a runaway guard, not a budget
 
 
@@ -800,7 +863,9 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
                 continue
             winner = (cand, {}, {}, raw)
             break
-        if _declared_miss(cand.endpoint, response.status, raw):
+        outcome = child_outcome(cand.endpoint, plan.contract, cand.adapter, response.status, raw,
+                                tier=cand.tier)
+        if outcome.kind == "declared_miss":
             # The provider's declared "asked and answered: no result" status (`miss: {status, means}`
             # on the endpoint - aviato/hunter/leadmagic/... 404 a person they have no record of),
             # optionally narrowed by a body predicate (`when`) where one status carries both a miss
@@ -812,7 +877,7 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
                 continue
             winner = (cand, {}, {}, raw)
             break
-        if declared_not_found(cand.endpoint, response.status, raw):
+        if outcome.kind == "not_found":
             # The provider reports that the TARGET does not exist (the scraped site answered 404 or
             # 410). Every other provider can only find the same nothing, or answer an empty page that
             # reads as a success, so the call ends here with that answer, charging nothing.
@@ -824,13 +889,7 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
                 "tried": [t.view() for t in tried], "charged_micro": spent,
                 "message": f"{cand.endpoint['id']} reports that the target does not exist",
                 "provider_response": raw[:600].decode("utf-8", "replace")})
-        capacity_signal = classify_capacity(cand.endpoint["provider"], response.status, body=raw)
-        temporary_capacity = capacity_signal is not None and capacity_signal.kind in ("burst", "unknown")
-        platform_auth_failure = cand.tier == "platform" and response.status in (401, 403)
-        # 405 and 410 Gone say the PROVIDER cannot serve this route (a discontinued endpoint answers
-        # 410 to every request), whatever the caller sent: fall over as after a 5xx, paid providers too.
-        if (400 <= response.status < 500 and response.status not in (402, 405, 408, 410, 429)
-                and not platform_auth_failure and not temporary_capacity):
+        if outcome.kind == "rejected":
             # The vendor rejected the REQUEST. Usually the caller's mistake and the same answer
             # everywhere - but a scraper's "Request failed. Please retry" is also a 400 (tikhub), so
             # the waterfall goes on to providers that are FREE ON FAILURE (per_success / free / <= 1c
@@ -860,48 +919,26 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
                 "message": f"{cand.endpoint['id']} rejected the request ({response.status}); "
                            + ("not retried elsewhere" if len(rejected_by) == 1 else "every free-on-failure provider rejected it too"),
                 "provider_response": raw[:600].decode("utf-8", "replace")})
-        if not 200 <= response.status < 300:
+        if outcome.kind == "error":
             errors += 1
             tried.append(Attempt(cand.endpoint["id"], cand.endpoint["provider"], "error", response.status, charged, raw[:120].decode("utf-8", "replace")))
             if errors > MAX_ERROR_FALLBACKS or not plan.contract.idempotent:
                 break
             continue
-        try:
-            doc = json.loads(raw)
-        except ValueError:
-            doc = None
-        # An adapter transform that throws on unexpected provider output must not crash the parent
-        # after a child already answered (and was audited OK): record it as an error attempt and
-        # let the waterfall go on, so the worst case is a structured `route_failed` with `tried`.
-        try:
-            core = cand.adapter.from_upstream(doc) if doc is not None else {}
-        except Exception as exc:  # noqa: BLE001 — adapter threw on provider response
+        if outcome.kind == "adapter_error":
+            # An adapter that throws on unexpected provider output must not crash the parent after
+            # a child already answered (and was audited OK): record it as an error attempt and let
+            # the waterfall go on, so the worst case is a structured `route_failed` with `tried`.
             errors += 1
             tried.append(Attempt(cand.endpoint["id"], cand.endpoint["provider"], "error", response.status, charged,
-                                 f"adapter.from_upstream failed: {exc}"[:120]))
+                                 outcome.detail))
             if errors > MAX_ERROR_FALLBACKS or not plan.contract.idempotent:
                 break
             continue
-        # A miss is what the adapter's predicate says - OR a 2xx whose body does not carry the
-        # contract's required core (a null `result` under a 200, an error task inside a 20000
-        # envelope): the caller asked for the field and did not get it.
-        empty_core = any(core.get(k) in (None, "", [], {}) for k in plan.contract.required_output)
-        try:
-            is_miss = cand.adapter.is_miss(doc) if doc is not None else True
-        except Exception as exc:  # noqa: BLE001 — adapter threw on provider response
-            errors += 1
-            tried.append(Attempt(cand.endpoint["id"], cand.endpoint["provider"], "error", response.status, charged,
-                                 f"adapter.is_miss failed: {exc}"[:120]))
-            if errors > MAX_ERROR_FALLBACKS or not plan.contract.idempotent:
-                break
-            continue
-        # The provider's own `expect` success rule (a DataForSEO task status other than 20000 under
-        # a 20000 envelope) says this request failed: not an answer, whatever the remains read as.
-        upstream_failed = catalog_results.fails_expect(cand.endpoint["id"], raw)
-        if doc is None or is_miss or empty_core or upstream_failed:
+        doc, core = outcome.doc, outcome.core
+        if outcome.kind == "miss":
             tried.append(Attempt(cand.endpoint["id"], cand.endpoint["provider"], "miss", response.status, charged,
-                                 f"provider reported failure: {upstream_failed}" if upstream_failed else "",
-                                 ignored=ignored))
+                                 outcome.detail, ignored=ignored))
             if options.waterfall:
                 continue
             winner = (cand, doc if doc is not None else {}, {}, raw)
@@ -909,7 +946,7 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
         # A HIT that answers thinly is not the end of the search. `min_results` lets the caller say
         # how many rows make an answer; below it the waterfall keeps going and the best result so
         # far is kept, so a weak first provider can still win if nothing better turns up.
-        n_rows = max((len(v) for v in core.values() if isinstance(v, list)), default=1)
+        n_rows = outcome.rows
         weak = options.waterfall and n_rows < options.min_results
         # `X-Treg-Route-Complete`: an answer carrying under half the contract's output fields is
         # weak like a short list (the fullest one wins if nothing better turns up), and an answer

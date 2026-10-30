@@ -246,6 +246,12 @@ Regenerate via `scripts/build-map.py`.
 | `src/treg/application/provider_resources.py` | architecture/catalog.md, architecture/multi-tenancy.md, interface/api.md |
 | `src/treg/application/rankings.py` | architecture/catalog.md |
 | `src/treg/application/referrals.py` | architecture/money.md, interface/api.md |
+| `src/treg/application/replay/__init__.py` | architecture/replay.md |
+| `src/treg/application/replay/__main__.py` | architecture/replay.md |
+| `src/treg/application/replay/differ.py` | architecture/replay.md |
+| `src/treg/application/replay/engine.py` | architecture/replay.md |
+| `src/treg/application/replay/fixtures.py` | architecture/replay.md |
+| `src/treg/application/replay/records.py` | architecture/replay.md |
 | `src/treg/application/search_experiment.py` | architecture/search-experiment.md |
 | `src/treg/application/shadow.py` | architecture/shadow.md |
 | `src/treg/application/showcase.py` | architecture/showcase.md |
@@ -647,6 +653,8 @@ Regenerate via `scripts/build-map.py`.
 | `src/treg/web/media/signin-sso.js` | interface/seo.md |
 | `src/treg/web/people-search.html` | interface/seo.md |
 | `src/treg/web/rankings.html` | interface/seo.md |
+| `src/treg/web/rea-growth.html` | interface/seo.md |
+| `src/treg/web/rea-growth.md` | interface/seo.md |
 | `src/treg/web/recruit.html` | interface/seo.md |
 | `src/treg/web/robots.txt` | interface/seo.md |
 | `src/treg/web/selfhost.sh` | ops/deploy.md |
@@ -656,6 +664,7 @@ Regenerate via `scripts/build-map.py`.
 | `src/treg/web/skills/jev-memory/SKILL.md` | interface/skill.md |
 | `src/treg/web/skills/lead-signals/SKILL.md` | interface/skill.md |
 | `src/treg/web/skills/make-ugc/SKILL.md` | interface/skill.md |
+| `src/treg/web/skills/rea-growth/SKILL.md` | interface/skill.md |
 | `src/treg/web/skills/recruit/SKILL.md` | interface/skill.md |
 | `src/treg/web/skills/web-access/SKILL.md` | interface/skill.md |
 | `src/treg/web/start.html` | interface/seo.md |
@@ -773,6 +782,7 @@ Regenerate via `scripts/build-map.py`.
 | `tests/test_redundant_index_migration.py` | architecture/data-model.md |
 | `tests/test_relay_content_length.py` | architecture/proxy-model.md |
 | `tests/test_released_cli_compat.py` | interface/cli.md |
+| `tests/test_replay.py` | architecture/replay.md |
 | `tests/test_reviews.py` | architecture/feedback.md |
 | `tests/test_route_cost_ceiling.py` | architecture/catalog.md |
 | `tests/test_routing.py` | architecture/catalog.md |
@@ -824,6 +834,7 @@ Regenerate via `scripts/build-map.py`.
 | `architecture/org-traffic.md` | `org_traffic.py`, `structured_logging.py`, `bootstrap.py`, `call.py`, `table.py`, `mcp.py`, `types.py`, `service.py`, `test_org_traffic.py`, `test_org_concurrency.py` |
 | `architecture/policy-extensions.md` | `policy.py`, `bootstrap.py`, `signup.py`, `promotions.py`, `test_policy.py` |
 | `architecture/proxy-model.md` | `relay.py`, `jsontext.py`, `ssrf.py`, `api.py`, `authorize.py`, `idempotency.py`, `intake.py`, `resolve.py`, `reserve.py`, `settle.py`, `evidence.py`, `service.py`, `types.py`, `asynctasks.py`, `keyslots.py`, `0069_platform_key_slot.py`, `test_platform_accounts.py`, `client_identity.py`, `call_surface.py`, `sandbox_identity.py`, `access.py`, `publicdemo.py`, `usage.py`, `call.py`, `limits.py`, `test_ssrf_public_addresses.py`, `test_call_application_contract.py`, `test_call_cancellation.py`, `test_call_response_limits.py`, `test_error_capture.py`, `test_marketplace_call.py`, `test_oauth_billed.py`, `test_passthrough.py`, `test_tag_billing.py`, `test_tag_billing_adversarial.py`, `test_call_architecture.py`, `test_asynctasks.py`, `test_relay_content_length.py` |
+| `architecture/replay.md` | `__init__.py`, `__main__.py`, `records.py`, `engine.py`, `fixtures.py`, `differ.py`, `test_replay.py` |
 | `architecture/search-experiment.md` | `catalog_search.py`, `search_experiment.py`, `interleave.py`, `judge.py`, `0041_searchlog.py`, `0056_searchlog_verdict.py`, `search_experiment_report.sql`, `search_agent_bench.py`, `test_search_experiment.py`, `test_catalog_search.py`, `test_search_agent_bench.py` |
 | `architecture/shadow.md` | `shadow.py`, `shadow.py`, `0086_shadow_pairs.py`, `test_shadow.py` |
 | `architecture/showcase.md` | `__init__.py`, `showcase.py`, `showcase.py`, `__init__.py`, `images.py`, `images.py`, `imaging.py`, `media_store.py`, `0076_showcase_and_avatars.py`, `showcase.html`, `test_showcase_leaderboard.py`, `test_images.py` |
@@ -840,11 +851,11 @@ Regenerate via `scripts/build-map.py`.
 | `interface/env-import.md` | `providers.py`, `skills.py` |
 | `interface/landing-sandbox.md` | `sandbox.py`, `sandbox_identity.py`, `sandbox.py`, `__init__.py`, `sandbox.py`, `api.py`, `onboard.py`, `web.py`, `access.py`, `boot.js`, `SignedOutPage.vue`, `install.sh` |
 | `interface/onboarding.md` | `auth.py`, `__init__.py`, `demo.py`, `first_run.py`, `sitetrack.js`, `cli.py`, `auth.py`, `onboard.py`, `onboarding.js`, `GettingStartedPage.vue` |
-| `interface/seo.md` | `api.py`, `web.py`, `agent_pages.py`, `robots.txt`, `catalog.css`, `usecase.css`, `index.html`, `App.vue`, `PublicNavigation.vue`, `boot.js`, `landing.html`, `product-theme.css`, `refinement.css`, `gateway.css`, `hero-opening.js`, `refinement.js`, `catalog-drum.js`, `gateway.js`, `gateway-loader.js`, `gateway-3d.js`, `gateway-model.js`, `gateway-intro.js`, `hero-particles.js`, `command-beam.js`, `SOURCES.md`, `landing.spec.ts`, `terms.html`, `usecase-seo.html`, `usecase-company.html`, `usecase-enrichment.html`, `usecase-social.html`, `usecase-ads.html`, `people-search.html`, `leads-signals.html`, `recruit.html`, `web-access.html`, `gtm-engineering.html`, `grokbot.html`, `fable-gtm.html`, `ugc.html`, `aeo.html`, `start.html`, `jev.html`, `showcase.html`, `rankings.html`, `rankings.py`, `wall.json`, `jev_xboost.py`, `house_calls.py`, `xboost-seed.json`, `triage.json`, `signals.json`, `astra.html`, `page.css`, `page.js`, `signin-sso.js`, `SignInDialog.vue`, `llms.txt`, `indexnow_submit.py`, `support.html`, `og-card.html` |
+| `interface/seo.md` | `api.py`, `web.py`, `agent_pages.py`, `robots.txt`, `catalog.css`, `usecase.css`, `index.html`, `App.vue`, `PublicNavigation.vue`, `boot.js`, `landing.html`, `product-theme.css`, `refinement.css`, `gateway.css`, `hero-opening.js`, `refinement.js`, `catalog-drum.js`, `gateway.js`, `gateway-loader.js`, `gateway-3d.js`, `gateway-model.js`, `gateway-intro.js`, `hero-particles.js`, `command-beam.js`, `SOURCES.md`, `landing.spec.ts`, `terms.html`, `usecase-seo.html`, `usecase-company.html`, `usecase-enrichment.html`, `usecase-social.html`, `usecase-ads.html`, `people-search.html`, `leads-signals.html`, `recruit.html`, `web-access.html`, `gtm-engineering.html`, `grokbot.html`, `fable-gtm.html`, `ugc.html`, `aeo.html`, `rea-growth.html`, `rea-growth.md`, `start.html`, `jev.html`, `showcase.html`, `rankings.html`, `rankings.py`, `wall.json`, `jev_xboost.py`, `house_calls.py`, `xboost-seed.json`, `triage.json`, `signals.json`, `astra.html`, `page.css`, `page.js`, `signin-sso.js`, `SignInDialog.vue`, `llms.txt`, `indexnow_submit.py`, `support.html`, `og-card.html` |
 | `interface/shell.md` | `shell.py`, `cli.py` |
 | `interface/skill-openai-test-cases.md` | _(no source files — narrative/reference)_ |
 | `interface/skill-openai-tool-justifications.md` | _(no source files — narrative/reference)_ |
-| `interface/skill.md` | `skill.md`, `integrate.md`, `SKILL.md`, `SKILL.md`, `SKILL.md`, `SKILL.md`, `SKILL.md`, `jev-memory.mjs`, `web.py`, `mcp_install.py`, `build_plugin.py`, `marketplace.json`, `plugin.json`, `marketplace.json`, `plugin.json`, `plugin.json`, `package.json`, `cordis.patch.yml`, `index.js`, `plugin.json`, `minimax_plugin.py` |
+| `interface/skill.md` | `skill.md`, `integrate.md`, `SKILL.md`, `SKILL.md`, `SKILL.md`, `SKILL.md`, `SKILL.md`, `SKILL.md`, `jev-memory.mjs`, `web.py`, `mcp_install.py`, `build_plugin.py`, `marketplace.json`, `plugin.json`, `marketplace.json`, `plugin.json`, `plugin.json`, `package.json`, `cordis.patch.yml`, `index.js`, `plugin.json`, `minimax_plugin.py` |
 | `interface/web-arena.md` | `web_arena.py`, `web_arena_scores.py`, `web_arena.py`, `web_arena_quality.py`, `web_arena_publications.py`, `web_arena_calls.py`, `web_arena.py`, `enterprise_sso.py`, `models.py`, `0057_web_arena.py`, `0058_web_arena_call_stats.py`, `0059_web_arena_seed_start.py`, `0060_web_arena_seed_progress.py`, `config.py`, `bootstrap.py`, `worker.py`, `web-arena.html`, `arena.js`, `arena.css`, `test_web_arena.py`, `test_web_arena_calls.py` |
 | `ops/capacity.md` | `__init__.py`, `capacity_notice.py`, `test_capacity_notice.py`, `collectors.py`, `policy.py`, `sweep.py`, `view.py`, `routes.py`, `signatures.py`, `verify.py`, `marks.py`, `events.py`, `test_capacity_protect.py`, `limiter.py`, `overflow_spend.py`, `routes_view.py`, `overflow.py`, `0007_overflow_spend.py`, `test_capacity_overflow.py`, `test_capacity_overflow_spend.py`, `0008_org_platform_overflow_disabled.py`, `test_capacity_smoothing.py`, `fair_share.py`, `test_capacity_fair_share.py`, `provider_concurrency.py`, `test_provider_concurrency_redis.py`, `overflow_seed.json`, `__init__.py`, `orthogonal.py`, `monid.py`, `catalogs.py`, `0006_overflow_route.py`, `test_capacity_overflow_routes.py`, `test_influencersclub_overflow.py`, `worker.py`, `provider_balances.py`, `0005_capacity_policy_snapshot.py`, `test_capacity_know.py`, `test_capacity_collectors.py`, `test_financialdatasets.py`, `test_tinyfish.py` |
 | `ops/deploy.md` | `pyproject.toml`, `hatch_build.py`, `build-dashboard.sh`, `build-web.sh`, `frontend-e2e-server.sh`, `__main__.py`, `maintenance.py`, `env.py`, `0034_managed_api_keys.py`, `0035_default_key_generation.py`, `0036_activity_key_indexes.py`, `worker.py`, `selfhost.sh`, `config.py`, `db.py`, `money_admission.py`, `bench_money_admission.py`, `email.py`, `audit.py`, `dev-local.sh`, `render.example.yaml` |
